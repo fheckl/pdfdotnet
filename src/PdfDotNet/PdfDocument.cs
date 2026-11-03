@@ -1,5 +1,6 @@
 namespace pdfdotnet;
 
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
@@ -54,6 +55,14 @@ public sealed class PdfDocument : IDisposable
         foreach (var font in fonts)
         {
             fontObjNumbers[font] = writer.NextObjectNumber();
+        }
+
+        // Collect images once, in order of first appearance across all pages.
+        var images = CollectImages(_pages);
+        var imageObjNumbers = new Dictionary<PdfImage, int>();
+        foreach (var image in images)
+        {
+            imageObjNumbers[image] = writer.NextObjectNumber();
         }
 
         // Per page: content stream object, then page object.
@@ -114,6 +123,27 @@ public sealed class PdfDocument : IDisposable
             writer.EndObject();
         }
 
+        // Images (XObject)
+        foreach (var image in images)
+        {
+            int imageObj = imageObjNumbers[image];
+            writer.BeginObject(imageObj);
+            writer.WriteDictionaryStart();
+            writer.WriteKey("/Type", "/XObject");
+            writer.WriteKey("/Subtype", "/Image");
+            writer.WriteKey("/Name", "/" + image.Name);
+            writer.WriteKey("/Width", image.Width.ToString());
+            writer.WriteKey("/Height", image.Height.ToString());
+            writer.WriteKey("/ColorSpace", image.ColorSpace);
+            writer.WriteKey("/BitsPerComponent", image.BitsPerComponent.ToString());
+            if (!string.IsNullOrEmpty(image.Filter))
+                writer.WriteKey("/Filter", image.Filter);
+            writer.WriteKey("/Length", image.Data.Length.ToString());
+            writer.WriteDictionaryEnd();
+            writer.WriteStream(image.Data);
+            writer.EndObject();
+        }
+
         // Pages: content stream + page object
         for (int i = 0; i < _pages.Count; i++)
         {
@@ -137,16 +167,32 @@ public sealed class PdfDocument : IDisposable
             writer.WriteKey("/Parent", $"{pagesObj} 0 R");
             writer.WriteKey("/MediaBox", $"[0 0 {Format(page.Size.WidthPoints)} {Format(page.Size.HeightPoints)}]");
 
-            // Resources: fonts of this page
-            if (page.FontNames.Count > 0)
+            // Resources: fonts and XObjects (images) of this page
+            bool hasResources = page.FontNames.Count > 0 || page.ImageNames.Count > 0;
+            if (hasResources)
             {
-                writer.WriteRaw("/Resources << /Font <<");
-                foreach (var kvp in page.FontNames)
+                writer.WriteRaw("/Resources <<");
+                if (page.FontNames.Count > 0)
                 {
-                    int fontObj = fontObjNumbers[kvp.Key];
-                    writer.WriteRaw($" /{kvp.Value} {fontObj} 0 R");
+                    writer.WriteRaw(" /Font <<");
+                    foreach (var kvp in page.FontNames)
+                    {
+                        int fontObj = fontObjNumbers[kvp.Key];
+                        writer.WriteRaw($" /{kvp.Value} {fontObj} 0 R");
+                    }
+                    writer.WriteRaw(" >>");
                 }
-                writer.WriteRaw(" >> >>");
+                if (page.ImageNames.Count > 0)
+                {
+                    writer.WriteRaw(" /XObject <<");
+                    foreach (var kvp in page.ImageNames)
+                    {
+                        int imageObj = imageObjNumbers[kvp.Key];
+                        writer.WriteRaw($" /{kvp.Value} {imageObj} 0 R");
+                    }
+                    writer.WriteRaw(" >>");
+                }
+                writer.WriteRaw(" >>");
             }
 
             writer.WriteKey("/Contents", $"{contentObj} 0 R");
@@ -196,6 +242,23 @@ public sealed class PdfDocument : IDisposable
                 if (seen.Add(font))
                 {
                     result.Add(font);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static List<PdfImage> CollectImages(IReadOnlyList<PdfPage> pages)
+    {
+        var result = new List<PdfImage>();
+        var seen = new HashSet<PdfImage>();
+        foreach (var page in pages)
+        {
+            foreach (var image in page.ImageNames.Keys)
+            {
+                if (seen.Add(image))
+                {
+                    result.Add(image);
                 }
             }
         }

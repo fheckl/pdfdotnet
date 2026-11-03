@@ -9,6 +9,9 @@ internal sealed class PdfContentStream
 {
     private readonly StringBuilder _commands = new();
     private bool _textBlockOpen;
+    private double _lineWidth = 1;
+    private double _strokeR = 0, _strokeG = 0, _strokeB = 0;
+    private double _fillR = 0, _fillG = 0, _fillB = 0;
 
     /// <summary>
     /// Returns the finished content as UTF-8 bytes.
@@ -59,6 +62,89 @@ internal sealed class PdfContentStream
         _commands.Append('(');
         _commands.Append(PdfStringEncoder.Encode(text));
         _commands.Append(") Tj\n");
+    }
+
+    /// <summary>
+    /// Sets line width (w).
+    /// </summary>
+    public void SetLineWidth(double width)
+    {
+        _lineWidth = width;
+        _commands.Append($"{FormatNumber(width)} w\n");
+    }
+
+    /// <summary>
+    /// Sets stroke color as RGB 0..1 (RG).
+    /// </summary>
+    public void SetStrokeColor(double r, double g, double b)
+    {
+        _strokeR = r; _strokeG = g; _strokeB = b;
+        _commands.Append($"{FormatNumber(r)} {FormatNumber(g)} {FormatNumber(b)} RG\n");
+    }
+
+    /// <summary>
+    /// Sets fill color as RGB 0..1 (rg).
+    /// </summary>
+    public void SetFillColor(double r, double g, double b)
+    {
+        _fillR = r; _fillG = g; _fillB = b;
+        _commands.Append($"{FormatNumber(r)} {FormatNumber(g)} {FormatNumber(b)} rg\n");
+    }
+
+    /// <summary>
+    /// Moves to a point without drawing (m).
+    /// </summary>
+    public void MoveTo(double x, double y)
+    {
+        _commands.Append($"{FormatNumber(x)} {FormatNumber(y)} m\n");
+    }
+
+    /// <summary>
+    /// Ensures the current line width is emitted (w). Called by DrawLine.
+    /// </summary>
+    public void EnsureLineWidth()
+    {
+        _commands.Append($"{_lineWidth} w\n");
+    }
+
+    /// <summary>
+    /// Draws a line to a point (l).
+    /// </summary>
+    public void LineTo(double x, double y)
+    {
+        _commands.Append($"{FormatNumber(x)} {FormatNumber(y)} l\n");
+    }
+
+    /// <summary>
+    /// Strokes the current path (S).
+    /// </summary>
+    public void Stroke()
+    {
+        _commands.Append("S\n");
+    }
+
+    /// <summary>
+    /// Fills the current path (f).
+    /// </summary>
+    public void Fill()
+    {
+        _commands.Append("f\n");
+    }
+
+    /// <summary>
+    /// Appends a rectangle to the current path (re).
+    /// </summary>
+    public void Rectangle(double x, double y, double width, double height)
+    {
+        _commands.Append($"{FormatNumber(x)} {FormatNumber(y)} {FormatNumber(width)} {FormatNumber(height)} re\n");
+    }
+
+    /// <summary>
+    /// Draws an XObject image (Do).
+    /// </summary>
+    public void DrawXObject(string name)
+    {
+        _commands.Append($"q 1 0 0 1 0 0 cm /{name} Do Q\n");
     }
 
     /// <summary>

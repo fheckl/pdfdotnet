@@ -133,6 +133,109 @@ public class PdfDocumentTests
     }
 
     [Fact]
+    public void DrawLine_WritesGraphicsOperators()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawLine(50, 100, 200, 300);
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert (default coordinate system: BottomLeft, no Y flip)
+        Assert.Contains("50 100 m", content);
+        Assert.Contains("200 300 l", content);
+        Assert.Contains("1 w\n", content);         // default line width
+        Assert.Contains("S\n", content);           // stroke
+    }
+
+    [Fact]
+    public void DrawRectangle_WritesRectOperator()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawRectangle(50, 100, 100, 50);
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("50 100 100 50 re", content);  // rect
+        Assert.Contains("S\n", content);               // stroke
+    }
+
+    [Fact]
+    public void DrawRectangleFilled_WritesFillOperator()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawRectangleFilled(50, 100, 100, 50);
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("50 100 100 50 re", content);
+        Assert.Contains("f\n", content);             // fill
+    }
+
+    [Fact]
+    public void DrawImage_EmbedsXObject()
+    {
+        // Arrange: minimal valid JPEG (1x1 pixel)
+        byte[] jpeg =
+        {
+            0xFF, 0xD8,                                // SOI
+            0xFF, 0xC0, 0x00, 0x11,                    // SOF0, length 17
+            0x08,                                      // precision 8
+            0x00, 0x01,                                // height 1
+            0x00, 0x01,                                // width 1
+            0x03,                                      // 3 components
+            0x01, 0x22, 0x00,                          // Y
+            0x02, 0x11, 0x00,                          // Cb
+            0x03, 0x11, 0x00,                          // Cr
+            0xFF, 0xD9                                 // EOI
+        };
+        var image = PdfImage.FromBytes("testimg", jpeg);
+
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawImage(image, 50, 100, 200, 150);
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("/Type /XObject", content);
+        Assert.Contains("/Subtype /Image", content);
+        Assert.Contains("/Width 1", content);
+        Assert.Contains("/Height 1", content);
+        Assert.Contains("/Filter /DCTDecode", content);
+        Assert.Contains("/ColorSpace /DeviceRGB", content);
+        Assert.Contains("/Im1", content);              // image reference in resources
+        Assert.Contains("q 200 0 0 150 50 100 cm /Im1 Do Q", content);
+    }
+
+    [Fact]
+    public void DrawImage_WithNullImage_Throws()
+    {
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        Assert.Throws<ArgumentNullException>(() => page.DrawImage(null!, 50, 50, 100, 100));
+    }
+
+    [Fact]
     public void DocumentInfo_IsWritten()
     {
         // Arrange
