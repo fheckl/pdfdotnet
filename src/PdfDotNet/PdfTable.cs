@@ -13,6 +13,12 @@ public sealed class PdfColumn
     /// <summary>Breite der Spalte in PDF-Punkten.</summary>
     public double WidthPoints { get; set; }
 
+    /// <summary>Textausrichtung in dieser Spalte (überschreibt Tabellen-Einstellung).</summary>
+    public PdfTextAlignment TextAlignment { get; set; } = PdfTextAlignment.Left;
+
+    /// <summary>Ob Text in dieser Spalte umbrochen werden soll.</summary>
+    public bool WrapText { get; set; } = true;
+
     public PdfColumn(string header, double widthPoints)
     {
         Header = header;
@@ -63,6 +69,12 @@ public sealed class PdfTable
     /// <summary>Ob Zellen- und Tabellen-Rahmen gezeichnet werden.</summary>
     public bool DrawBorders { get; set; } = true;
 
+    /// <summary>Standardausrichtung für alle Zellen (wird von Spalte überschrieben).</summary>
+    public PdfTextAlignment TextAlignment { get; set; } = PdfTextAlignment.Left;
+
+    /// <summary>Ob Text in Zellen umbrochen werden soll.</summary>
+    public bool WrapText { get; set; } = true;
+
     /// <summary>Hintergrundfarbe der Header-Zeile (null = keine Füllung).</summary>
     public (double R, double G, double B)? HeaderBackground { get; set; } = (0.9, 0.9, 0.9);
 
@@ -92,6 +104,17 @@ public sealed class PdfTable
 
     internal string GetColumnHeader(int index) => index < _columns.Count ? _columns[index].Header : string.Empty;
     internal double GetColumnWidth(int index) => index < _columns.Count ? _columns[index].WidthPoints : 0;
+    internal PdfTextAlignment GetColumnAlignment(int index)
+    {
+        if (index < _columns.Count && _columns[index].TextAlignment != PdfTextAlignment.Left)
+            return _columns[index].TextAlignment;
+        return TextAlignment;
+    }
+    internal bool GetColumnWrap(int index)
+    {
+        if (index < _columns.Count) return _columns[index].WrapText;
+        return WrapText;
+    }
     internal int RowCount => _rows.Count;
     internal string GetCell(int rowIndex, int colIndex)
     {

@@ -114,4 +114,88 @@ public class TableTests
         doc.Save(ms); // should not throw
         Assert.True(ms.Length > 0);
     }
+
+    [Fact]
+    public void DrawTable_WrapText_SplitsIntoMultipleLines()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+
+        var table = new PdfTable { WrapText = true, FontSize = 10 };
+        table.AddColumn("Description", 60); // narrow column -> wrapping
+        table.AddRow("This is a very long text that should wrap to multiple lines");
+        table.AddRow("Short");
+
+        // Act
+        page.DrawTable(table, 50, 800);
+
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("This", content);
+        Assert.Contains("long", content);
+        Assert.Contains("lines", content);
+        Assert.Contains("Short", content);
+        Assert.Contains("Tj", content); // text operations present
+    }
+
+    [Fact]
+    public void DrawTable_TextAlignment_Right()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+
+        var table = new PdfTable { TextAlignment = PdfTextAlignment.Right, WrapText = false };
+        table.AddColumn("Name", 100);
+        table.AddRow("Alice");
+
+        // Act
+        page.DrawTable(table, 50, 800);
+
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        Assert.Contains("Alice", content);
+        Assert.Contains("re", content); // borders
+    }
+
+    [Fact]
+    public void DrawTable_ContinuesOnNewPage_WhenNotFitting()
+    {
+        // Arrange: start near bottom so table must continue on next page
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+
+        var table = new PdfTable { WrapText = false, FontSize = 10, Padding = 5 };
+        table.AddColumn("Col1", 100);
+        table.AddColumn("Col2", 100);
+        for (int i = 0; i < 40; i++) // many rows -> won't fit on one page
+        {
+            table.AddRow($"Row {i}", $"Value {i}");
+        }
+
+        // Act: start very low so first rows overflow
+        page.DrawTable(table, 50, 100);
+
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var bytes = ms.ToArray();
+        var content = System.Text.Encoding.UTF8.GetString(bytes);
+
+        // Assert
+        Assert.StartsWith("%PDF-1.7", content);
+        Assert.EndsWith("%%EOF", content.TrimEnd('\n', '\r'));
+        // Table should span multiple pages (started near bottom with 40 rows)
+        var countMatch = System.Text.RegularExpressions.Regex.Match(content, @"/Count (\d+)");
+        Assert.True(countMatch.Success, "Should have a Pages count");
+        int pageCount = int.Parse(countMatch.Groups[1].Value);
+        Assert.True(pageCount > 1, $"Expected multiple pages, got {pageCount}");
+        Assert.Contains("Row 0", content);
+        Assert.Contains("Row 39", content);
+    }
 }

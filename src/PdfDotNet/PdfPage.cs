@@ -1,5 +1,6 @@
 namespace pdfdotnet;
 
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 
@@ -210,7 +211,8 @@ public sealed class PdfPage
     }
 
     /// <summary>
-    /// Draws a table on the page.
+    /// Draws a table on the page. If the table does not fit on the current page, it continues
+    /// on additional pages created automatically. The header row is repeated on each page.
     /// </summary>
     /// <param name="table">The table to draw.</param>
     /// <param name="x">Left X coordinate.</param>
@@ -220,89 +222,222 @@ public sealed class PdfPage
         if (table == null) throw new ArgumentNullException(nameof(table));
         if (table.ColumnCount == 0) return;
 
-        double startY = AdjustY(y);
-        double currentY = startY;
+        double pageBottom = 40; // minimal distance to bottom edge (BottomLeft coordinates)
         double currentX = x;
+        double currentY = AdjustY(y);
 
-        double rowHeight = table.FontSize * 1.4 + 2 * table.Padding;
+        PdfContentStream content = _content;
+        PdfPage currentPage = this;
 
-        if (table.DrawBorders)
+        int rowIdx = 0;
+        int totalRowCount = (table.HasHeaderRow ? 1 : 0) + table.RowCount;
+        bool headerDrawnOnCurrentPage = false;
+
+        while (rowIdx < totalRowCount)
         {
-            _content.SetStrokeColor(0, 0, 0);
-            _content.SetLineWidth(1);
-        }
+            bool isHeader = table.HasHeaderRow && rowIdx == 0 && !headerDrawnOnCurrentPage;
+            int dataRowIndex = isHeader ? -1 : rowIdx - (table.HasHeaderRow ? 1 : 0);
 
-        // Header row.
-        if (table.HasHeaderRow)
-        {
-            if (table.HeaderBackground.HasValue)
+            // Calculate required height for this row.
+            double rowHeight = CalculateRowHeight(table, dataRowIndex, table.FontSize, table.Padding);
+
+            // If not enough space and not the very first row, start a new page.
+            if (currentY - rowHeight < pageBottom && rowIdx > 0)
             {
-                var (r, g, b) = table.HeaderBackground.Value;
-                _content.SetFillColor(r, g, b);
-                _content.Rectangle(currentX, currentY - rowHeight, table.TotalWidth, rowHeight);
-                _content.Fill();
+                currentPage = _document.AddPage(Size);
+                content = currentPage.ContentStream;
+                currentY = AdjustY(Size.HeightPoints - 40); // top margin on new page
+                headerDrawnOnCurrentPage = false;
+                // Don't change rowIdx — the current row will be drawn on the new page.
+                continue;
             }
 
-            if (table.DrawBorders)
+            if (isHeader)
             {
-                double colX = currentX;
-                foreach (var col in table.Columns)
-                {
-                    _content.Rectangle(colX, currentY - rowHeight, col.WidthPoints, rowHeight);
-                    colX += col.WidthPoints;
-                }
-                _content.Stroke();
+                headerDrawnOnCurrentPage = true;
             }
 
-            double colXText = currentX + table.Padding;
-            string fontName = GetTableFontName(table.Font);
-            foreach (var col in table.Columns)
-            {
-                _content.BeginText();
-                _content.SetFont(fontName, table.FontSize);
-                _content.SetTextPosition(colXText, currentY - rowHeight + table.Padding + table.FontSize * 0.7);
-                _content.ShowText(col.Header);
-                _content.EndText();
-                colXText += col.WidthPoints;
-            }
-
+            DrawTableRow(content, table, dataRowIndex, currentX, currentY, isHeader,
+                table.FontSize, table.Padding);
             currentY -= rowHeight;
+            rowIdx++;
+        }
+    }
+
+    /// <summary>
+    /// Calculates the required height for a table row, considering text wrapping.
+    /// </summary>
+    private double CalculateRowHeight(PdfTable table, int dataRowIndex, double fontSize, double padding)
+    {
+        bool isHeader = dataRowIndex < 0;
+        int maxLines = 1;
+
+        for (int col = 0; col < table.ColumnCount; col++)
+        {
+            string text = isHeader ? table.GetColumnHeader(col) : table.GetCell(dataRowIndex, col);
+            if (string.IsNullOrEmpty(text)) continue;
+
+            double colWidth = table.GetColumnWidth(col);
+            double maxTextWidth = colWidth - 2 * padding;
+            if (maxTextWidth < 10) maxTextWidth = 10;
+
+            bool wrap = table.GetColumnWrap(col);
+            int lines = wrap ? WrapLineCount(text, table.Font, fontSize, maxTextWidth) : 1;
+            if (lines > maxLines) maxLines = lines;
         }
 
-        // Data rows.
-        for (int i = 0; i < table.RowCount; i++)
+        return maxLines * fontSize * 1.2 + 2 * padding;
+    }
+
+    /// <summary>
+    /// Draws a single table row onto the given content stream.
+    /// </summary>
+    private void DrawTableRow(PdfContentStream content, PdfTable table, int dataRowIndex,
+        double startX, double topY, bool isHeader, double fontSize, double padding)
+    {
+        bool drawBorders = table.DrawBorders;
+        double rowHeight = CalculateRowHeight(table, dataRowIndex, fontSize, padding);
+        double rowBottom = topY - rowHeight;
+
+        string fontName = GetTableFontName(table.Font);
+
+        // Background for header.
+        if (isHeader && table.HeaderBackground.HasValue)
         {
-            double rowTop = currentY;
+            var (r, g, b) = table.HeaderBackground.Value;
+            content.SetFillColor(r, g, b);
+            content.Rectangle(startX, rowBottom, table.TotalWidth, rowHeight);
+            content.Fill();
+        }
 
-            if (table.DrawBorders)
-            {
-                double colX = currentX;
-                foreach (var col in table.Columns)
-                {
-                    _content.Rectangle(colX, rowTop - rowHeight, col.WidthPoints, rowHeight);
-                    colX += col.WidthPoints;
-                }
-                _content.Stroke();
-            }
-
-            double colXText = currentX + table.Padding;
-            string fontName = GetTableFontName(table.Font);
+        // Draw cell borders.
+        if (drawBorders)
+        {
+            content.SetStrokeColor(0, 0, 0);
+            content.SetLineWidth(1);
+            double colX = startX;
             for (int col = 0; col < table.ColumnCount; col++)
             {
-                string cellText = table.GetCell(i, col);
-                double colWidth = table.GetColumnWidth(col);
+                content.Rectangle(colX, rowBottom, table.GetColumnWidth(col), rowHeight);
+                colX += table.GetColumnWidth(col);
+            }
+            content.Stroke();
+        }
 
-                _content.BeginText();
-                _content.SetFont(fontName, table.FontSize);
-                _content.SetTextPosition(colXText, rowTop - rowHeight + table.Padding + table.FontSize * 0.7);
-                _content.ShowText(cellText);
-                _content.EndText();
-
-                colXText += colWidth;
+        // Draw text in each cell.
+        double colXText = startX + padding;
+        for (int col = 0; col < table.ColumnCount; col++)
+        {
+            string text = isHeader ? table.GetColumnHeader(col) : table.GetCell(dataRowIndex, col);
+            if (string.IsNullOrEmpty(text))
+            {
+                colXText += table.GetColumnWidth(col);
+                continue;
             }
 
-            currentY -= rowHeight;
+            double colWidth = table.GetColumnWidth(col);
+            PdfTextAlignment alignment = table.GetColumnAlignment(col);
+            bool wrap = table.GetColumnWrap(col);
+
+            var lines = wrap ? WrapTextToLines(text, table.Font, fontSize, colWidth - 2 * padding)
+                : new List<string> { text };
+
+            double lineHeight = fontSize * 1.2;
+            double textBlockHeight = lines.Count * lineHeight;
+            double textStartY = rowBottom + padding + (rowHeight - 2 * padding - textBlockHeight) / 2 + fontSize * 0.7;
+
+            for (int i = 0; i < lines.Count; i++)
+            {
+                string line = lines[i];
+                double lineWidth = MeasureTextWidth(line, table.Font, fontSize);
+                double textX = colXText;
+
+                switch (alignment)
+                {
+                    case PdfTextAlignment.Center:
+                        textX += (colWidth - 2 * padding - lineWidth) / 2;
+                        break;
+                    case PdfTextAlignment.Right:
+                        textX += (colWidth - 2 * padding - lineWidth) - padding;
+                        break;
+                    default: // Left
+                        textX += 0;
+                        break;
+                }
+
+                double lineY = textStartY + i * lineHeight;
+
+                content.BeginText();
+                content.SetFont(fontName, fontSize);
+                content.SetTextPosition(textX, lineY);
+                content.ShowText(line);
+                content.EndText();
+            }
+
+            colXText += colWidth;
         }
+    }
+
+    /// <summary>
+    /// Measures the width of a text string in PDF points.
+    /// </summary>
+    private double MeasureTextWidth(string text, PdfFont font, double size)
+    {
+        double width = 0;
+        if (_document.Fonts.Embedded.TryGetValue(font, out var embedded))
+        {
+            foreach (char c in text)
+            {
+                short units = embedded.GetAdvanceWidth(c);
+                if (units > 0)
+                    width += units * size / embedded.UnitsPerEm;
+                else
+                    width += 0.5 * size;
+            }
+        }
+        else
+        {
+            width = text.Length * 0.5 * size;
+        }
+        return width;
+    }
+
+    /// <summary>
+    /// Wraps a text into lines that fit within maxWidth.
+    /// </summary>
+    private List<string> WrapTextToLines(string text, PdfFont font, double size, double maxWidth)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(text)) return result;
+
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return result;
+
+        var current = new System.Text.StringBuilder();
+        foreach (var word in words)
+        {
+            string trial = current.Length > 0 ? current + " " + word : word;
+            if (MeasureTextWidth(trial, font, size) <= maxWidth || current.Length == 0)
+            {
+                current.Append(current.Length > 0 ? " " + word : word);
+            }
+            else
+            {
+                result.Add(current.ToString());
+                current.Clear();
+                current.Append(word);
+            }
+        }
+        if (current.Length > 0) result.Add(current.ToString());
+        return result;
+    }
+
+    /// <summary>
+    /// Returns the number of lines a text would need when wrapped to maxWidth.
+    /// </summary>
+    private int WrapLineCount(string text, PdfFont font, double size, double maxWidth)
+    {
+        return WrapTextToLines(text, font, size, maxWidth).Count;
     }
 
     /// <summary>
