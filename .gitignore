@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# macOS
+.DS_Store
+
+# NuGet
+*.nuget.props
+*.nuget.targets
+
+# Temporary test artifacts
+*.pdf
