@@ -104,7 +104,7 @@ public sealed class PdfDocument : IDisposable
         var usedGlyphs = CollectUsedGlyphs(usedFonts);
         var usedImages = CollectUsedImages();
 
-        // ---- Reserve object numbers in advance ----
+        // ---- Reserve object numbers for non-page objects ----
         bool hasInfo = InfoHasAny();
         int infoObj = hasInfo ? writer.NextObjectNumber() : 0;
         int catalogObj = writer.NextObjectNumber();
@@ -131,15 +131,8 @@ public sealed class PdfDocument : IDisposable
             imageObjNumbers[image] = writer.NextObjectNumber();
         }
 
-        var pageEntries = new List<(int contentObj, int pageObj)>();
-        foreach (var _ in _pages)
-        {
-            int contentObj = writer.NextObjectNumber();
-            int pageObj = writer.NextObjectNumber();
-            pageEntries.Add((contentObj, pageObj));
-        }
-
-        // ---- Pass 2: write objects ----
+        // ---- Write non-page objects (Info, Catalog, Fonts, Images) ----
+        // NOTE: Pages tree is intentionally written AFTER all pages (streaming-friendly).
 
         // Info
         if (hasInfo)
@@ -157,21 +150,11 @@ public sealed class PdfDocument : IDisposable
             writer.EndObject();
         }
 
-        // Catalog
+        // Catalog (references pagesObj; pages tree written later)
         writer.BeginObject(catalogObj);
         writer.WriteDictionaryStart();
         writer.WriteKey("/Type", "/Catalog");
         writer.WriteKey("/Pages", $"{pagesObj} 0 R");
-        writer.WriteDictionaryEnd();
-        writer.EndObject();
-
-        // Pages tree
-        var pageRefs = string.Join(" ", pageEntries.Select(e => $"{e.pageObj} 0 R"));
-        writer.BeginObject(pagesObj);
-        writer.WriteDictionaryStart();
-        writer.WriteKey("/Type", "/Pages");
-        writer.WriteKey("/Kids", $"[{pageRefs}]");
-        writer.WriteKey("/Count", _pages.Count.ToString());
         writer.WriteDictionaryEnd();
         writer.EndObject();
 
@@ -187,7 +170,7 @@ public sealed class PdfDocument : IDisposable
                 var subset = embedded.CreateSubset($"subset{fontObj}", charsForFont);
                 subsetFonts[font] = subset;
 
-                // FontFile2 stream
+                // FontFile stream
                 int fontFileObj = fontFileObjNumbers[font];
                 writer.BeginObject(fontFileObj);
                 writer.WriteDictionaryStart();
@@ -244,11 +227,11 @@ public sealed class PdfDocument : IDisposable
             writer.EndObject();
         }
 
-        // Pages: content stream + page object
+        // ---- Pages: content stream + page object, written one at a time (streaming) ----
+        var pageRefs = new List<string>();
         for (int i = 0; i < _pages.Count; i++)
         {
             var page = _pages[i];
-            var (contentObj, pageObj) = pageEntries[i];
 
             var pageFontNames = new Dictionary<PdfFont, string>();
             var pageGlyphMaps = new Dictionary<PdfFont, IReadOnlyDictionary<char, byte>>();
@@ -271,15 +254,12 @@ public sealed class PdfDocument : IDisposable
                 }
             }
 
-            byte[] contentBytes = page.BuildContentStream(pageFontNames,
+            // Write content stream directly (gets its own object number)
+            int contentObj = page.WriteContentStream(writer, pageFontNames,
                 pageGlyphMaps.Count > 0 ? pageGlyphMaps : null);
 
-            writer.BeginObject(contentObj);
-            writer.WriteDictionaryStart();
-            writer.WriteKey("/Length", contentBytes.Length.ToString());
-            writer.WriteDictionaryEnd();
-            writer.WriteStream(contentBytes);
-            writer.EndObject();
+            // Write page object immediately after
+            int pageObj = writer.NextObjectNumber();
 
             writer.BeginObject(pageObj);
             writer.WriteDictionaryStart();
@@ -317,7 +297,18 @@ public sealed class PdfDocument : IDisposable
             writer.WriteKey("/Contents", $"{contentObj} 0 R");
             writer.WriteDictionaryEnd();
             writer.EndObject();
+
+            pageRefs.Add($"{pageObj} 0 R");
         }
+
+        // ---- Pages tree (written after all pages) ----
+        writer.BeginObject(pagesObj);
+        writer.WriteDictionaryStart();
+        writer.WriteKey("/Type", "/Pages");
+        writer.WriteKey("/Kids", $"[{string.Join(" ", pageRefs)}]");
+        writer.WriteKey("/Count", _pages.Count.ToString());
+        writer.WriteDictionaryEnd();
+        writer.EndObject();
 
         // ---- XRef, trailer, startxref, EOF ----
         int maxObj = writer.LastObjectNumber;

@@ -210,15 +210,20 @@ public sealed class PdfPage
     }
 
     /// <summary>
-    /// Builds the PDF content stream for this page using the given font name and glyph mappings.
+    /// Writes the PDF content stream for this page directly into the given object writer.
+    /// This avoids keeping all pages' content bytes in memory at once (streaming-friendly).
     /// </summary>
+    /// <param name="writer">Target object writer.</param>
     /// <param name="fontNames">Maps a PdfFont to its PDF resource name (e.g. F1, F2).</param>
     /// <param name="glyphMaps">Maps a PdfFont to a char->byte glyph index mapping (embedded fonts only).</param>
-    public byte[] BuildContentStream(IReadOnlyDictionary<PdfFont, string> fontNames,
+    /// <returns>The object number of the written content stream.</returns>
+    internal int WriteContentStream(PdfObjectWriter writer,
+        IReadOnlyDictionary<PdfFont, string> fontNames,
         IReadOnlyDictionary<PdfFont, IReadOnlyDictionary<char, byte>>? glyphMaps = null)
     {
-        var content = new PdfContentStream();
         glyphMaps ??= new Dictionary<PdfFont, IReadOnlyDictionary<char, byte>>();
+
+        var content = new PdfContentStream();
 
         foreach (var op in _textOperations)
         {
@@ -264,16 +269,22 @@ public sealed class PdfPage
             content.EndText();
         }
 
-        // Non-text drawing ops were already written to _content during DrawLine/DrawRectangle/etc.
-        // We need to merge them. For simplicity, prepend the text ops and append the graphics ops.
-        // However _content is a separate instance. We instead return the combined bytes.
         byte[] textBytes = content.ToBytes();
         byte[] graphicsBytes = _content.ToBytes();
 
         var combined = new byte[textBytes.Length + graphicsBytes.Length];
         Buffer.BlockCopy(textBytes, 0, combined, 0, textBytes.Length);
         Buffer.BlockCopy(graphicsBytes, 0, combined, textBytes.Length, graphicsBytes.Length);
-        return combined;
+
+        int contentObj = writer.NextObjectNumber();
+        writer.BeginObject(contentObj);
+        writer.WriteDictionaryStart();
+        writer.WriteKey("/Length", combined.Length.ToString());
+        writer.WriteDictionaryEnd();
+        writer.WriteStream(combined);
+        writer.EndObject();
+
+        return contentObj;
     }
 
     private double AdjustY(double y)
