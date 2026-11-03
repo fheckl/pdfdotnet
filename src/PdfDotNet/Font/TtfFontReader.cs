@@ -145,11 +145,48 @@ internal sealed class TtfFontReader : IDisposable
         // Loca offsets are read on demand in ReadGlyf via GetGlyphOffset.
     }
 
+    private bool GetLongOffsets()
+    {
+        if (!_tables.TryGetValue("head", out var head)) return false;
+        _reader.BaseStream.Position = head.Offset + 50; // indexToLocFormat
+        return ReadInt16(_reader) != 0;
+    }
+
     private ushort GetGlyphOffset(ushort glyphId, bool longOffsets)
     {
         if (!_tables.TryGetValue("loca", out var loca)) return 0;
         _reader.BaseStream.Position = loca.Offset + (longOffsets ? (uint)(glyphId * 4) : (uint)(glyphId * 2));
         return longOffsets ? (ushort)ReadUInt32(_reader) : ReadUInt16(_reader);
+    }
+
+    /// <summary>
+    /// Returns the raw glyf bytes for a glyph (including its header: contours, bounds, etc.).
+    /// </summary>
+    public byte[] GetGlyphRawData(ushort glyphId)
+    {
+        if (!_tables.TryGetValue("glyf", out var glyf) ||
+            !_tables.TryGetValue("loca", out var loca))
+        {
+            return Array.Empty<byte>();
+        }
+
+        bool longOffsets = GetLongOffsets();
+        uint locaPos = loca.Offset + (longOffsets ? (uint)(glyphId * 4) : (uint)(glyphId * 2));
+
+        _reader.BaseStream.Position = locaPos;
+        uint start = longOffsets ? ReadUInt32(_reader) : ReadUInt16(_reader);
+
+        _reader.BaseStream.Position = locaPos + (longOffsets ? 4u : 2u);
+        uint end = longOffsets ? ReadUInt32(_reader) : ReadUInt16(_reader);
+
+        if (end <= start) return Array.Empty<byte>();
+
+        uint absStart = glyf.Offset + start;
+        uint absEnd = glyf.Offset + end;
+        uint length = absEnd - absStart;
+
+        _reader.BaseStream.Position = absStart;
+        return _reader.ReadBytes((int)length);
     }
 
     private void ReadGlyf()

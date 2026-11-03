@@ -84,7 +84,7 @@ public sealed class PdfEmbeddedFont : IDisposable
 
         byte[] subsetData = glyphMap.Count == 0
             ? Array.Empty<byte>()
-            : BuildSubsetTtf(_reader, glyphMap);
+            : TtfSubsetBuilder.Build(_reader, glyphMap);
 
         return new PdfEmbeddedFont(subsetName, PostScriptName, subsetData,
             glyphMap, Ascent, Descent, UnitsPerEm, null, _fontData);
@@ -93,13 +93,5 @@ public sealed class PdfEmbeddedFont : IDisposable
     public void Dispose()
     {
         _reader?.Dispose();
-    }
-
-    private static byte[] BuildSubsetTtf(TtfFontReader reader, Dictionary<char, byte> glyphMap)
-    {
-        // Pragmatic v0.3: embed the full original TTF data. The glyph map tells
-        // the content stream which byte to emit for each character. True outline
-        // subsetting (trimming glyf/loca/cmap to used glyphs) can be added later.
-        return reader.FontData;
     }
 }

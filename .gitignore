@@ -15,3 +15,7 @@ obj/
 
 # Temporary test artifacts
 *.pdf
+
+# Test fonts (do not commit licensed font binaries)
+testassets/*.ttf
+testassets/*.otf
