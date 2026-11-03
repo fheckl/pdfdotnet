@@ -9,9 +9,11 @@ public sealed class PdfEmbeddedFont : IDisposable
 {
     private readonly TtfFontReader? _reader;
     private readonly byte[] _fontData;
+    private readonly Dictionary<char, short> _advanceWidths = new();
 
     private PdfEmbeddedFont(string baseName, string postScriptName, byte[] subsetData,
         Dictionary<char, byte> glyphMap, short ascent, short descent, ushort unitsPerEm,
+        Dictionary<char, short> advanceWidths,
         TtfFontReader? reader, byte[] fontData)
     {
         BaseName = baseName;
@@ -21,6 +23,7 @@ public sealed class PdfEmbeddedFont : IDisposable
         Ascent = ascent;
         Descent = descent;
         UnitsPerEm = unitsPerEm;
+        _advanceWidths = advanceWidths;
         _reader = reader;
         _fontData = fontData;
     }
@@ -49,6 +52,14 @@ public sealed class PdfEmbeddedFont : IDisposable
     public ushort UnitsPerEm { get; }
 
     /// <summary>
+    /// Returns the advance width of a character in font units, or 0 if unknown.
+    /// </summary>
+    public short GetAdvanceWidth(char c)
+    {
+        return _advanceWidths.TryGetValue(c, out var w) ? w : (short)0;
+    }
+
+    /// <summary>
     /// Creates an embedded font from a TTF stream. The reader is kept open for subsetting.
     /// </summary>
     public static PdfEmbeddedFont Create(Stream ttfStream, string baseName)
@@ -61,7 +72,7 @@ public sealed class PdfEmbeddedFont : IDisposable
 
         return new PdfEmbeddedFont(baseName, postScriptName, Array.Empty<byte>(),
             new Dictionary<char, byte>(), reader.Ascender, reader.Descender, reader.UnitsPerEm,
-            reader, reader.FontData);
+            new Dictionary<char, short>(), reader, reader.FontData);
     }
 
     /// <summary>
@@ -72,6 +83,7 @@ public sealed class PdfEmbeddedFont : IDisposable
         if (_reader == null) throw new InvalidOperationException("Font reader is not available.");
 
         var glyphMap = new Dictionary<char, byte>();
+        var advanceWidths = new Dictionary<char, short>();
         byte nextIndex = 1; // 0 = .notdef
 
         foreach (char c in characters.OrderBy(c => c))
@@ -79,6 +91,10 @@ public sealed class PdfEmbeddedFont : IDisposable
             if (_reader.Cmap.TryGetValue(c, out ushort glyphId))
             {
                 glyphMap[c] = nextIndex++;
+                if (_reader.Hmtx.TryGetValue(glyphId, out var metrics))
+                {
+                    advanceWidths[c] = metrics.advanceWidth;
+                }
             }
         }
 
@@ -87,7 +103,7 @@ public sealed class PdfEmbeddedFont : IDisposable
             : TtfSubsetBuilder.Build(_reader, glyphMap);
 
         return new PdfEmbeddedFont(subsetName, PostScriptName, subsetData,
-            glyphMap, Ascent, Descent, UnitsPerEm, null, _fontData);
+            glyphMap, Ascent, Descent, UnitsPerEm, advanceWidths, null, _fontData);
     }
 
     public void Dispose()

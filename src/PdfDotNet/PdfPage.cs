@@ -6,7 +6,8 @@ using System.Text;
 /// <summary>
 /// A single text drawing operation, stored before the content stream is finalized.
 /// </summary>
-internal sealed record PdfTextOperation(string Text, PdfFont Font, double Size, double X, double Y);
+internal sealed record PdfTextOperation(string Text, PdfFont Font, double Size, double X, double Y,
+    double R = 0, double G = 0, double B = 0);
 
 /// <summary>
 /// Represents a single PDF page and provides the high-level drawing API.
@@ -39,13 +40,94 @@ public sealed class PdfPage
     /// bottom edge, with <see cref="PdfCoordinateSystem.TopLeft"/> from top edge.</param>
     /// <param name="font">The font to use.</param>
     /// <param name="size">Font size in PDF points.</param>
-    public void DrawText(string text, double x, double y, PdfFont font, double size)
+    /// <param name="r">Red component 0..1. Default 0 (black).</param>
+    /// <param name="g">Green component 0..1. Default 0 (black).</param>
+    /// <param name="b">Blue component 0..1. Default 0 (black).</param>
+    public void DrawText(string text, double x, double y, PdfFont font, double size,
+        double r = 0, double g = 0, double b = 0)
     {
         if (string.IsNullOrEmpty(text)) return;
         if (font == null) throw new ArgumentNullException(nameof(font));
         if (size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
 
-        _textOperations.Add(new PdfTextOperation(text, font, size, x, y));
+        _textOperations.Add(new PdfTextOperation(text, font, size, x, y, r, g, b));
+    }
+
+    /// <summary>
+    /// Draws text wrapped at word boundaries within a maximum width.
+    /// </summary>
+    /// <param name="text">The text to output.</param>
+    /// <param name="x">X coordinate (from left).</param>
+    /// <param name="y">Y coordinate of the first line (bottom edge).</param>
+    /// <param name="maxWidth">Maximum line width in PDF points.</param>
+    /// <param name="font">The font to use.</param>
+    /// <param name="size">Font size in PDF points.</param>
+    /// <param name="lineHeight">Vertical distance between lines. Default: 1.2 * size.</param>
+    /// <param name="r">Red component 0..1. Default 0 (black).</param>
+    /// <param name="g">Green component 0..1. Default 0 (black).</param>
+    /// <param name="b">Blue component 0..1. Default 0 (black).</param>
+    /// <returns>The Y coordinate after the last line (useful for continuing below).</returns>
+    public double DrawWrappedText(string text, double x, double y, double maxWidth, PdfFont font, double size,
+        double lineHeight = 0, double r = 0, double g = 0, double b = 0)
+    {
+        if (string.IsNullOrEmpty(text)) return y;
+        if (font == null) throw new ArgumentNullException(nameof(font));
+        if (size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
+        if (maxWidth <= 0) throw new ArgumentOutOfRangeException(nameof(maxWidth));
+
+        if (lineHeight <= 0) lineHeight = size * 1.2;
+
+        double currentY = y;
+        double currentX = x;
+
+        // Split into words.
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return y;
+
+        // Measure helper.
+        double Measure(string s)
+        {
+            double width = 0;
+            foreach (char c in s)
+            {
+                width += GetCharWidth(font, c, size);
+            }
+            return width;
+        }
+
+        double spaceWidth = GetCharWidth(font, ' ', size);
+
+        foreach (var word in words)
+        {
+            double wordWidth = Measure(word);
+
+            if (currentX + wordWidth > x + maxWidth && currentX > x)
+            {
+                // Wrap to next line.
+                currentY -= lineHeight;
+                currentX = x;
+            }
+
+            _textOperations.Add(new PdfTextOperation(word, font, size, currentX, currentY, r, g, b));
+            currentX += wordWidth + spaceWidth;
+        }
+
+        return currentY;
+    }
+
+    private double GetCharWidth(PdfFont font, char c, double size)
+    {
+        // For embedded fonts, use the advance width from hmtx scaled to size.
+        // For Base-14 fonts, use a rough average (0.5 * size).
+        if (_document.Fonts.Embedded.TryGetValue(font, out var embedded))
+        {
+            short units = embedded.GetAdvanceWidth(c);
+            if (units > 0)
+            {
+                return units * size / embedded.UnitsPerEm;
+            }
+        }
+        return 0.5 * size;
     }
 
     /// <summary>
@@ -145,6 +227,12 @@ public sealed class PdfPage
                 : op.Y;
 
             string fontName = fontNames.TryGetValue(op.Font, out var n) ? n : GetFontName(op.Font);
+
+            // Set fill color if non-black.
+            if (op.R != 0 || op.G != 0 || op.B != 0)
+            {
+                content.SetFillColor(op.R, op.G, op.B);
+            }
 
             content.BeginText();
             content.SetFont(fontName, op.Size);

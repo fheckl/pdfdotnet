@@ -33,6 +33,19 @@ public sealed class PdfFontCollection
         return pdfFont;
     }
 
+    /// <summary>
+    /// Embeds a TTF font from a file path. Returns a <see cref="PdfFont"/> usable in <see cref="PdfPage.DrawText"/>.
+    /// </summary>
+    public PdfFont AddEmbeddedFromFile(string path, string name)
+    {
+        if (string.IsNullOrEmpty(path)) throw new ArgumentNullException(nameof(path));
+        if (!File.Exists(path)) throw new FileNotFoundException("Font file not found.", path);
+        if (string.IsNullOrEmpty(name)) throw new ArgumentNullException(nameof(name));
+
+        using var fs = File.OpenRead(path);
+        return AddEmbedded(fs, name);
+    }
+
     internal IReadOnlyDictionary<PdfFont, PdfEmbeddedFont> Embedded => _embedded;
 }
 

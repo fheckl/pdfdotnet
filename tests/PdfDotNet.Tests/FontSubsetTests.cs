@@ -65,7 +65,70 @@ public class FontSubsetTests
 
         // Assert
         Assert.Contains("/Subtype /TrueType", content);
-        Assert.Contains("/FontFile", content); // /FontFile2 stream
+        Assert.Contains("/FontFile", content); // /FontFile stream
         Assert.Contains("/BaseFont", content);
+    }
+
+    [Fact]
+    public void AddEmbeddedFromFile_LoadsFont()
+    {
+        if (!File.Exists(TestFontPath))
+        {
+            return;
+        }
+
+        // Arrange
+        var doc = new PdfDocument();
+
+        // Act
+        var font = doc.Fonts.AddEmbeddedFromFile(TestFontPath, "FromFile");
+
+        // Assert
+        Assert.NotNull(font);
+        Assert.False(string.IsNullOrEmpty(font.BaseFont));
+    }
+
+    [Fact]
+    public void AddEmbeddedFromFile_MissingFile_Throws()
+    {
+        var doc = new PdfDocument();
+        Assert.Throws<FileNotFoundException>(() => doc.Fonts.AddEmbeddedFromFile("nonexistent.ttf", "X"));
+    }
+
+    [Fact]
+    public void DrawText_WithColor_WritesColorOperator()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawText("Red text", 50, 800, PdfFont.Helvetica, 12, 1, 0, 0);
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("1 0 0 rg", content);
+    }
+
+    [Fact]
+    public void DrawWrappedText_WrapsAtMaxWidth()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+
+        // Act
+        double endY = page.DrawWrappedText("This is a longer text that should wrap", 50, 800, 100, PdfFont.Helvetica, 10);
+
+        // Assert
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Should contain multiple text operations (at least 2 lines)
+        Assert.True(content.Contains("Tj") || content.Contains("TJ"), "Should contain text operations");
+        Assert.True(endY < 800, "Y should move down after wrapping");
     }
 }
