@@ -1,0 +1,11 @@
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/PdfDotNet.GeneratedMSBuildEditorConfig.editorconfig
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/PdfDotNet.AssemblyInfoInputs.cache
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/PdfDotNet.AssemblyInfo.cs
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/PdfDotNet.csproj.CoreCompileInputs.cache
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/bin/Debug/net10.0/PdfDotNet.deps.json
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/bin/Debug/net10.0/PdfDotNet.dll
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/bin/Debug/net10.0/PdfDotNet.pdb
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/PdfDotNet.dll
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/refint/PdfDotNet.dll
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/PdfDotNet.pdb
+/Users/fheckl/projects/personal/pdfdotnet/src/PdfDotNet/obj/Debug/net10.0/ref/PdfDotNet.dll

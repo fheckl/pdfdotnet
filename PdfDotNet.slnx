@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PdfDotNet/PdfDotNet.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PdfDotNet.Tests/PdfDotNet.Tests.csproj" />
+  </Folder>
+</Solution>
