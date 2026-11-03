@@ -115,7 +115,7 @@ public sealed class PdfPage
         return currentY;
     }
 
-    private double GetCharWidth(PdfFont font, char c, double size)
+    internal double GetCharWidth(PdfFont font, char c, double size)
     {
         // For embedded fonts, use the advance width from hmtx scaled to size.
         // For Base-14 fonts, use a rough average (0.5 * size).
@@ -210,6 +210,102 @@ public sealed class PdfPage
     }
 
     /// <summary>
+    /// Draws a table on the page.
+    /// </summary>
+    /// <param name="table">The table to draw.</param>
+    /// <param name="x">Left X coordinate.</param>
+    /// <param name="y">Top Y coordinate (BottomLeft: from bottom edge, TopLeft: from top edge).</param>
+    public void DrawTable(PdfTable table, double x, double y)
+    {
+        if (table == null) throw new ArgumentNullException(nameof(table));
+        if (table.ColumnCount == 0) return;
+
+        double startY = AdjustY(y);
+        double currentY = startY;
+        double currentX = x;
+
+        double rowHeight = table.FontSize * 1.4 + 2 * table.Padding;
+
+        if (table.DrawBorders)
+        {
+            _content.SetStrokeColor(0, 0, 0);
+            _content.SetLineWidth(1);
+        }
+
+        // Header row.
+        if (table.HasHeaderRow)
+        {
+            if (table.HeaderBackground.HasValue)
+            {
+                var (r, g, b) = table.HeaderBackground.Value;
+                _content.SetFillColor(r, g, b);
+                _content.Rectangle(currentX, currentY - rowHeight, table.TotalWidth, rowHeight);
+                _content.Fill();
+            }
+
+            if (table.DrawBorders)
+            {
+                double colX = currentX;
+                foreach (var col in table.Columns)
+                {
+                    _content.Rectangle(colX, currentY - rowHeight, col.WidthPoints, rowHeight);
+                    colX += col.WidthPoints;
+                }
+                _content.Stroke();
+            }
+
+            double colXText = currentX + table.Padding;
+            string fontName = GetTableFontName(table.Font);
+            foreach (var col in table.Columns)
+            {
+                _content.BeginText();
+                _content.SetFont(fontName, table.FontSize);
+                _content.SetTextPosition(colXText, currentY - rowHeight + table.Padding + table.FontSize * 0.7);
+                _content.ShowText(col.Header);
+                _content.EndText();
+                colXText += col.WidthPoints;
+            }
+
+            currentY -= rowHeight;
+        }
+
+        // Data rows.
+        for (int i = 0; i < table.RowCount; i++)
+        {
+            double rowTop = currentY;
+
+            if (table.DrawBorders)
+            {
+                double colX = currentX;
+                foreach (var col in table.Columns)
+                {
+                    _content.Rectangle(colX, rowTop - rowHeight, col.WidthPoints, rowHeight);
+                    colX += col.WidthPoints;
+                }
+                _content.Stroke();
+            }
+
+            double colXText = currentX + table.Padding;
+            string fontName = GetTableFontName(table.Font);
+            for (int col = 0; col < table.ColumnCount; col++)
+            {
+                string cellText = table.GetCell(i, col);
+                double colWidth = table.GetColumnWidth(col);
+
+                _content.BeginText();
+                _content.SetFont(fontName, table.FontSize);
+                _content.SetTextPosition(colXText, rowTop - rowHeight + table.Padding + table.FontSize * 0.7);
+                _content.ShowText(cellText);
+                _content.EndText();
+
+                colXText += colWidth;
+            }
+
+            currentY -= rowHeight;
+        }
+    }
+
+    /// <summary>
     /// Writes the PDF content stream for this page directly into the given object writer.
     /// This avoids keeping all pages' content bytes in memory at once (streaming-friendly).
     /// </summary>
@@ -292,6 +388,15 @@ public sealed class PdfPage
         return _document.Options.CoordinateSystem == PdfCoordinateSystem.TopLeft
             ? Size.HeightPoints - y
             : y;
+    }
+
+    private string GetTableFontName(PdfFont font)
+    {
+        if (_document.Fonts.Embedded.TryGetValue(font, out var embedded))
+        {
+            return embedded.PostScriptName.Replace(" ", string.Empty);
+        }
+        return font.BaseFont.Replace(" ", string.Empty);
     }
 
     internal string GetFontName(PdfFont font)
