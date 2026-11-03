@@ -6,7 +6,7 @@ namespace pdfdotnet;
 /// </summary>
 public sealed class PdfFont
 {
-    private PdfFont(string baseFont)
+    internal PdfFont(string baseFont)
     {
         BaseFont = baseFont;
     }

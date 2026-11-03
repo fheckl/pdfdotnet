@@ -1,6 +1,12 @@
 namespace pdfdotnet;
 
+using System.Globalization;
 using System.Text;
+
+/// <summary>
+/// A single text drawing operation, stored before the content stream is finalized.
+/// </summary>
+internal sealed record PdfTextOperation(string Text, PdfFont Font, double Size, double X, double Y);
 
 /// <summary>
 /// Represents a single PDF page and provides the high-level drawing API.
@@ -9,6 +15,7 @@ public sealed class PdfPage
 {
     private readonly PdfDocument _document;
     private readonly PdfContentStream _content = new();
+    private readonly List<PdfTextOperation> _textOperations = new();
     private readonly Dictionary<PdfFont, string> _fontNames = new();
     private readonly Dictionary<PdfImage, string> _imageNames = new();
     private int _fontCounter = 1;
@@ -38,17 +45,7 @@ public sealed class PdfPage
         if (font == null) throw new ArgumentNullException(nameof(font));
         if (size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
 
-        double yAdjusted = _document.Options.CoordinateSystem == PdfCoordinateSystem.TopLeft
-            ? Size.HeightPoints - y
-            : y;
-
-        string fontName = GetFontName(font);
-
-        _content.BeginText();
-        _content.SetFont(fontName, size);
-        _content.SetTextPosition(x, yAdjusted);
-        _content.ShowText(text);
-        _content.EndText();
+        _textOperations.Add(new PdfTextOperation(text, font, size, x, y));
     }
 
     /// <summary>
@@ -80,8 +77,6 @@ public sealed class PdfPage
     {
         double yAdj = AdjustY(y);
 
-        // In BottomLeft, y is the bottom edge; in TopLeft, y is the top edge.
-        // PDF rectangle operator takes lower-left corner. Adjust accordingly.
         double rectY = _document.Options.CoordinateSystem == PdfCoordinateSystem.TopLeft
             ? yAdj - height
             : yAdj;
@@ -129,8 +124,68 @@ public sealed class PdfPage
 
         string imageName = GetImageName(image);
 
-        // Save graphics state, scale to image size, place image, restore.
         _content.Raw($"q {Format(width)} 0 0 {Format(height)} {Format(x)} {Format(imgY)} cm /{imageName} Do Q");
+    }
+
+    /// <summary>
+    /// Builds the PDF content stream for this page using the given font name and glyph mappings.
+    /// </summary>
+    /// <param name="fontNames">Maps a PdfFont to its PDF resource name (e.g. F1, F2).</param>
+    /// <param name="glyphMaps">Maps a PdfFont to a char->byte glyph index mapping (embedded fonts only).</param>
+    public byte[] BuildContentStream(IReadOnlyDictionary<PdfFont, string> fontNames,
+        IReadOnlyDictionary<PdfFont, IReadOnlyDictionary<char, byte>>? glyphMaps = null)
+    {
+        var content = new PdfContentStream();
+        glyphMaps ??= new Dictionary<PdfFont, IReadOnlyDictionary<char, byte>>();
+
+        foreach (var op in _textOperations)
+        {
+            double yAdjusted = _document.Options.CoordinateSystem == PdfCoordinateSystem.TopLeft
+                ? Size.HeightPoints - op.Y
+                : op.Y;
+
+            string fontName = fontNames.TryGetValue(op.Font, out var n) ? n : GetFontName(op.Font);
+
+            content.BeginText();
+            content.SetFont(fontName, op.Size);
+            content.SetTextPosition(op.X, yAdjusted);
+
+            if (glyphMaps.TryGetValue(op.Font, out var glyphMap))
+            {
+                // Embedded font: emit glyph indices as bytes in a TJ array.
+                var ids = new List<byte>();
+                foreach (char c in op.Text)
+                {
+                    if (glyphMap.TryGetValue(c, out byte glyphIndex))
+                    {
+                        ids.Add(glyphIndex);
+                    }
+                    else
+                    {
+                        ids.Add(0); // .notdef
+                    }
+                }
+                content.ShowGlyphIds(ids);
+            }
+            else
+            {
+                // Base-14 font: WinAnsi encoded literal string.
+                content.ShowText(op.Text);
+            }
+
+            content.EndText();
+        }
+
+        // Non-text drawing ops were already written to _content during DrawLine/DrawRectangle/etc.
+        // We need to merge them. For simplicity, prepend the text ops and append the graphics ops.
+        // However _content is a separate instance. We instead return the combined bytes.
+        byte[] textBytes = content.ToBytes();
+        byte[] graphicsBytes = _content.ToBytes();
+
+        var combined = new byte[textBytes.Length + graphicsBytes.Length];
+        Buffer.BlockCopy(textBytes, 0, combined, 0, textBytes.Length);
+        Buffer.BlockCopy(graphicsBytes, 0, combined, textBytes.Length, graphicsBytes.Length);
+        return combined;
     }
 
     private double AdjustY(double y)
@@ -159,9 +214,10 @@ public sealed class PdfPage
     internal PdfContentStream ContentStream => _content;
     internal IReadOnlyDictionary<PdfFont, string> FontNames => _fontNames;
     internal IReadOnlyDictionary<PdfImage, string> ImageNames => _imageNames;
+    internal IReadOnlyList<PdfTextOperation> TextOperations => _textOperations;
 
     private static string Format(double value)
     {
-        return value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        return value.ToString("0.##", CultureInfo.InvariantCulture);
     }
 }

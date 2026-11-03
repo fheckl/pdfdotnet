@@ -1,8 +1,40 @@
 namespace pdfdotnet;
 
+using pdfdotnet.Font;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
+
+/// <summary>
+/// Collection of embedded fonts for a document.
+/// </summary>
+public sealed class PdfFontCollection
+{
+    private readonly PdfDocument _document;
+    private readonly Dictionary<PdfFont, PdfEmbeddedFont> _embedded = new();
+
+    internal PdfFontCollection(PdfDocument document)
+    {
+        _document = document;
+    }
+
+    /// <summary>
+    /// Embeds a TTF font from a stream. Returns a <see cref="PdfFont"/> usable in <see cref="PdfPage.DrawText"/>.
+    /// </summary>
+    public PdfFont AddEmbedded(Stream ttfStream, string name)
+    {
+        if (ttfStream == null) throw new ArgumentNullException(nameof(ttfStream));
+        if (string.IsNullOrEmpty(name)) throw new ArgumentNullException(nameof(name));
+
+        var embedded = PdfEmbeddedFont.Create(ttfStream, name);
+        var pdfFont = new PdfFont(embedded.PostScriptName);
+        _embedded[pdfFont] = embedded;
+        return pdfFont;
+    }
+
+    internal IReadOnlyDictionary<PdfFont, PdfEmbeddedFont> Embedded => _embedded;
+}
 
 /// <summary>
 /// A PDF document. Produces a PDF 1.7 document and writes it to a stream or file.
@@ -10,6 +42,7 @@ using System.Text;
 public sealed class PdfDocument : IDisposable
 {
     private readonly List<PdfPage> _pages = new();
+    private readonly PdfFontCollection _fonts;
 
     /// <summary>Document metadata.</summary>
     public PdfDocumentInfo Info { get; } = new();
@@ -19,6 +52,17 @@ public sealed class PdfDocument : IDisposable
 
     /// <summary>All pages of the document.</summary>
     public IReadOnlyList<PdfPage> Pages => _pages.AsReadOnly();
+
+    /// <summary>Embedded font collection.</summary>
+    public PdfFontCollection Fonts => _fonts;
+
+    /// <summary>
+    /// Creates a new PDF document.
+    /// </summary>
+    public PdfDocument()
+    {
+        _fonts = new PdfFontCollection(this);
+    }
 
     /// <summary>
     /// Adds a new page with the given paper size.
@@ -42,30 +86,38 @@ public sealed class PdfDocument : IDisposable
         var writer = new PdfObjectWriter(stream);
         writer.WriteHeader();
 
-        // ---- 1. Reserve object numbers in advance (order determines references) ----
+        // ---- Pass 1: collect all fonts, glyphs, and images used across all pages ----
+        var usedFonts = CollectUsedFonts();
+        var usedGlyphs = CollectUsedGlyphs(usedFonts);
+        var usedImages = CollectUsedImages();
 
+        // ---- Reserve object numbers in advance ----
         bool hasInfo = InfoHasAny();
         int infoObj = hasInfo ? writer.NextObjectNumber() : 0;
         int catalogObj = writer.NextObjectNumber();
         int pagesObj = writer.NextObjectNumber();
 
-        // Collect fonts once, in order of first appearance across all pages.
-        var fonts = CollectFonts(_pages);
         var fontObjNumbers = new Dictionary<PdfFont, int>();
-        foreach (var font in fonts)
+        foreach (var font in usedFonts)
         {
             fontObjNumbers[font] = writer.NextObjectNumber();
         }
 
-        // Collect images once, in order of first appearance across all pages.
-        var images = CollectImages(_pages);
+        var fontFileObjNumbers = new Dictionary<PdfFont, int>();
+        foreach (var font in usedFonts)
+        {
+            if (_fonts.Embedded.ContainsKey(font))
+            {
+                fontFileObjNumbers[font] = writer.NextObjectNumber();
+            }
+        }
+
         var imageObjNumbers = new Dictionary<PdfImage, int>();
-        foreach (var image in images)
+        foreach (var image in usedImages)
         {
             imageObjNumbers[image] = writer.NextObjectNumber();
         }
 
-        // Per page: content stream object, then page object.
         var pageEntries = new List<(int contentObj, int pageObj)>();
         foreach (var _ in _pages)
         {
@@ -74,8 +126,9 @@ public sealed class PdfDocument : IDisposable
             pageEntries.Add((contentObj, pageObj));
         }
 
-        // ---- 2. Write objects ----
+        // ---- Pass 2: write objects ----
 
+        // Info
         if (hasInfo)
         {
             writer.BeginObject(infoObj);
@@ -109,29 +162,63 @@ public sealed class PdfDocument : IDisposable
         writer.WriteDictionaryEnd();
         writer.EndObject();
 
-        // Fonts
-        foreach (var font in fonts)
+        // Font objects + embedded font file streams
+        var subsetFonts = new Dictionary<PdfFont, PdfEmbeddedFont>();
+        foreach (var font in usedFonts)
         {
             int fontObj = fontObjNumbers[font];
-            writer.BeginObject(fontObj);
-            writer.WriteDictionaryStart();
-            writer.WriteKey("/Type", "/Font");
-            writer.WriteKey("/Subtype", "/Type1");
-            writer.WriteKey("/BaseFont", "/" + font.BaseFont);
-            writer.WriteKey("/Encoding", "/WinAnsiEncoding");
-            writer.WriteDictionaryEnd();
-            writer.EndObject();
+
+            if (_fonts.Embedded.TryGetValue(font, out var embedded))
+            {
+                var charsForFont = usedGlyphs.TryGetValue(font, out var chars) ? chars : new HashSet<char>();
+                var subset = embedded.CreateSubset($"subset{fontObj}", charsForFont);
+                subsetFonts[font] = subset;
+
+                // FontFile2 stream
+                int fontFileObj = fontFileObjNumbers[font];
+                writer.BeginObject(fontFileObj);
+                writer.WriteDictionaryStart();
+                writer.WriteKey("/Type", "/FontFile");
+                writer.WriteKey("/Length", subset.SubsetData.Length.ToString());
+                writer.WriteDictionaryEnd();
+                writer.WriteStream(subset.SubsetData);
+                writer.EndObject();
+
+                // Font object
+                writer.BeginObject(fontObj);
+                writer.WriteDictionaryStart();
+                writer.WriteKey("/Type", "/Font");
+                writer.WriteKey("/Subtype", "/TrueType");
+                writer.WriteKey("/BaseFont", "/" + subset.PostScriptName);
+                writer.WriteKey("/FirstChar", "0");
+                writer.WriteKey("/LastChar", "255");
+                var widths = BuildWidths(subset, charsForFont);
+                writer.WriteKey("/Widths", $"[{string.Join(" ", widths.Select(w => w.ToString()))}]");
+                writer.WriteKey("/FontDescriptor", $"{fontFileObj} 0 R");
+                writer.WriteDictionaryEnd();
+                writer.EndObject();
+            }
+            else
+            {
+                writer.BeginObject(fontObj);
+                writer.WriteDictionaryStart();
+                writer.WriteKey("/Type", "/Font");
+                writer.WriteKey("/Subtype", "/Type1");
+                writer.WriteKey("/BaseFont", "/" + font.BaseFont);
+                writer.WriteKey("/Encoding", "/WinAnsiEncoding");
+                writer.WriteDictionaryEnd();
+                writer.EndObject();
+            }
         }
 
-        // Images (XObject)
-        foreach (var image in images)
+        // Image XObjects
+        foreach (var image in usedImages)
         {
             int imageObj = imageObjNumbers[image];
             writer.BeginObject(imageObj);
             writer.WriteDictionaryStart();
             writer.WriteKey("/Type", "/XObject");
             writer.WriteKey("/Subtype", "/Image");
-            writer.WriteKey("/Name", "/" + image.Name);
             writer.WriteKey("/Width", image.Width.ToString());
             writer.WriteKey("/Height", image.Height.ToString());
             writer.WriteKey("/ColorSpace", image.ColorSpace);
@@ -150,9 +237,30 @@ public sealed class PdfDocument : IDisposable
             var page = _pages[i];
             var (contentObj, pageObj) = pageEntries[i];
 
-            byte[] contentBytes = page.ContentStream.ToBytes();
+            var pageFontNames = new Dictionary<PdfFont, string>();
+            var pageGlyphMaps = new Dictionary<PdfFont, IReadOnlyDictionary<char, byte>>();
 
-            // Content stream object
+            foreach (var font in page.FontNames.Keys)
+            {
+                pageFontNames[font] = page.FontNames[font];
+            }
+
+            foreach (var op in page.TextOperations)
+            {
+                if (!pageFontNames.ContainsKey(op.Font))
+                {
+                    pageFontNames[op.Font] = page.GetFontName(op.Font);
+                }
+                if (_fonts.Embedded.TryGetValue(op.Font, out _) &&
+                    subsetFonts.TryGetValue(op.Font, out var subset))
+                {
+                    pageGlyphMaps[op.Font] = subset.GlyphMap;
+                }
+            }
+
+            byte[] contentBytes = page.BuildContentStream(pageFontNames,
+                pageGlyphMaps.Count > 0 ? pageGlyphMaps : null);
+
             writer.BeginObject(contentObj);
             writer.WriteDictionaryStart();
             writer.WriteKey("/Length", contentBytes.Length.ToString());
@@ -160,22 +268,20 @@ public sealed class PdfDocument : IDisposable
             writer.WriteStream(contentBytes);
             writer.EndObject();
 
-            // Page object
             writer.BeginObject(pageObj);
             writer.WriteDictionaryStart();
             writer.WriteKey("/Type", "/Page");
             writer.WriteKey("/Parent", $"{pagesObj} 0 R");
             writer.WriteKey("/MediaBox", $"[0 0 {Format(page.Size.WidthPoints)} {Format(page.Size.HeightPoints)}]");
 
-            // Resources: fonts and XObjects (images) of this page
-            bool hasResources = page.FontNames.Count > 0 || page.ImageNames.Count > 0;
+            bool hasResources = pageFontNames.Count > 0 || page.ImageNames.Count > 0;
             if (hasResources)
             {
                 writer.WriteRaw("/Resources <<");
-                if (page.FontNames.Count > 0)
+                if (pageFontNames.Count > 0)
                 {
                     writer.WriteRaw(" /Font <<");
-                    foreach (var kvp in page.FontNames)
+                    foreach (var kvp in pageFontNames)
                     {
                         int fontObj = fontObjNumbers[kvp.Key];
                         writer.WriteRaw($" /{kvp.Value} {fontObj} 0 R");
@@ -200,10 +306,10 @@ public sealed class PdfDocument : IDisposable
             writer.EndObject();
         }
 
-        // ---- 3. XRef, trailer, startxref, EOF ----
+        // ---- XRef, trailer, startxref, EOF ----
         int maxObj = writer.LastObjectNumber;
         long xrefOffset = stream.Position;
-        writer.WriteXref(maxObj + 1); // including free object 0
+        writer.WriteXref(maxObj + 1);
         int rootObj = catalogObj;
         int infoRef = hasInfo ? infoObj : 0;
         writer.WriteTrailer(maxObj + 1, rootObj, infoRef);
@@ -222,37 +328,52 @@ public sealed class PdfDocument : IDisposable
         Save(fs);
     }
 
-    private bool InfoHasAny()
-    {
-        return !string.IsNullOrEmpty(Info.Title)
-            || !string.IsNullOrEmpty(Info.Author)
-            || !string.IsNullOrEmpty(Info.Subject)
-            || !string.IsNullOrEmpty(Info.Creator)
-            || !string.IsNullOrEmpty(Info.Producer);
-    }
-
-    private static List<PdfFont> CollectFonts(IReadOnlyList<PdfPage> pages)
+    private List<PdfFont> CollectUsedFonts()
     {
         var result = new List<PdfFont>();
         var seen = new HashSet<PdfFont>();
-        foreach (var page in pages)
+        foreach (var page in _pages)
         {
-            foreach (var font in page.FontNames.Keys)
+            foreach (var op in page.TextOperations)
             {
-                if (seen.Add(font))
+                if (seen.Add(op.Font))
                 {
-                    result.Add(font);
+                    result.Add(op.Font);
                 }
             }
         }
         return result;
     }
 
-    private static List<PdfImage> CollectImages(IReadOnlyList<PdfPage> pages)
+    private Dictionary<PdfFont, HashSet<char>> CollectUsedGlyphs(List<PdfFont> usedFonts)
+    {
+        var result = new Dictionary<PdfFont, HashSet<char>>();
+        foreach (var font in usedFonts)
+        {
+            result[font] = new HashSet<char>();
+        }
+
+        foreach (var page in _pages)
+        {
+            foreach (var op in page.TextOperations)
+            {
+                if (result.TryGetValue(op.Font, out var chars))
+                {
+                    foreach (char c in op.Text)
+                    {
+                        chars.Add(c);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    private List<PdfImage> CollectUsedImages()
     {
         var result = new List<PdfImage>();
         var seen = new HashSet<PdfImage>();
-        foreach (var page in pages)
+        foreach (var page in _pages)
         {
             foreach (var image in page.ImageNames.Keys)
             {
@@ -263,6 +384,23 @@ public sealed class PdfDocument : IDisposable
             }
         }
         return result;
+    }
+
+    private int[] BuildWidths(PdfEmbeddedFont subset, IReadOnlySet<char> chars)
+    {
+        // Simplified: 256 entries of 500 units (default width).
+        var widths = new int[256];
+        for (int i = 0; i < 256; i++) widths[i] = 500;
+        return widths;
+    }
+
+    private bool InfoHasAny()
+    {
+        return !string.IsNullOrEmpty(Info.Title)
+            || !string.IsNullOrEmpty(Info.Author)
+            || !string.IsNullOrEmpty(Info.Subject)
+            || !string.IsNullOrEmpty(Info.Creator)
+            || !string.IsNullOrEmpty(Info.Producer);
     }
 
     private static string Format(double value)

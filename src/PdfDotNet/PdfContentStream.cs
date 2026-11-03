@@ -65,6 +65,19 @@ internal sealed class PdfContentStream
     }
 
     /// <summary>
+    /// Shows an array of glyph IDs (TJ). Each glyph ID is written as a hex byte.
+    /// </summary>
+    public void ShowGlyphIds(IEnumerable<byte> glyphIds)
+    {
+        _commands.Append('[');
+        foreach (byte id in glyphIds)
+        {
+            _commands.Append($"<{id:X2}>");
+        }
+        _commands.Append("] TJ\n");
+    }
+
+    /// <summary>
     /// Sets line width (w).
     /// </summary>
     public void SetLineWidth(double width)
