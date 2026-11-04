@@ -55,20 +55,35 @@ public sealed class PdfPage
     /// Draws text on the page.
     /// </summary>
     /// <param name="text">The text to output.</param>
-    /// <param name="x">X coordinate (from left).</param>
+    /// <param name="x">X coordinate (from left). With alignment, this is the left edge of the bounding box.</param>
     /// <param name="y">Y coordinate. With <see cref="PdfCoordinateSystem.BottomLeft"/> measured from
     /// bottom edge, with <see cref="PdfCoordinateSystem.TopLeft"/> from top edge.</param>
     /// <param name="font">The font to use.</param>
     /// <param name="size">Font size in PDF points.</param>
     /// <param name="color">Text color. Default: black.</param>
-    public void DrawText(string text, double x, double y, PdfFont font, double size, PdfColor color)
+    /// <param name="alignment">Text alignment within the bounding box defined by <paramref name="width"/>.</param>
+    /// <param name="width">Bounding box width for alignment. When 0, alignment has no effect.</param>
+    public void DrawText(string text, double x, double y, PdfFont font, double size, PdfColor color,
+        PdfTextAlignment alignment = PdfTextAlignment.Left, double width = 0)
     {
         if (string.IsNullOrEmpty(text)) return;
         if (font == null) throw new ArgumentNullException(nameof(font));
         if (size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
         if (color == null) throw new ArgumentNullException(nameof(color));
 
-        _textOperations.Add(new PdfTextOperation(text, font, size, x, y, color.R, color.G, color.B));
+        double finalX = x;
+        if (width > 0 && alignment != PdfTextAlignment.Left)
+        {
+            double textW = MeasureTextWidth(text, font, size);
+            finalX = alignment switch
+            {
+                PdfTextAlignment.Center => x + (width - textW) / 2,
+                PdfTextAlignment.Right => x + width - textW,
+                _ => x
+            };
+        }
+
+        _textOperations.Add(new PdfTextOperation(text, font, size, finalX, y, color.R, color.G, color.B));
     }
 
     /// <summary>
