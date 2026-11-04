@@ -1,6 +1,7 @@
 namespace pdfdotnet.Font;
 
 using System.IO;
+using System.Text;
 
 /// <summary>
 /// A font embedded from a TTF file, with subsetting support.
@@ -57,6 +58,40 @@ public sealed class PdfEmbeddedFont : IDisposable
     public short GetAdvanceWidth(char c)
     {
         return _advanceWidths.TryGetValue(c, out var w) ? w : (short)0;
+    }
+
+    /// <summary>
+    /// Builds a ToUnicode CMap that maps glyph IDs (CIDs in Identity-H encoding) to Unicode code points.
+    /// </summary>
+    public byte[] BuildToUnicodeCMap()
+    {
+        var entries = GlyphMap
+            .Where(kvp => kvp.Value > 0) // skip .notdef (glyph index 0)
+            .OrderBy(kvp => kvp.Value)
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.Append("%CIDInit\n");
+        sb.Append("/CIDInit /ProcSet findresource begin\n");
+        sb.Append("12 dict begin\n");
+        sb.Append("begincmap\n");
+        sb.Append("/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n");
+        sb.Append("/CMapName /ToUnicode def\n");
+        sb.Append("/CMapType 2 def\n");
+        sb.Append("1 begincodespacerange\n");
+        sb.Append("<00><FF> endcodespacerange\n");
+        sb.Append($"{entries.Count} beginbfchar\n");
+        foreach (var kvp in entries)
+        {
+            sb.Append($"<{kvp.Value:X2}><{(int)kvp.Key:X4}>\n");
+        }
+        sb.Append("endbfchar\n");
+        sb.Append("endcmap\n");
+        sb.Append("CMapName currentdict /CMap defineresource pop\n");
+        sb.Append("end\n");
+        sb.Append("end\n");
+
+        return Encoding.ASCII.GetBytes(sb.ToString());
     }
 
     /// <summary>

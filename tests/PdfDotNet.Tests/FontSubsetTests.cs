@@ -131,4 +131,49 @@ public class FontSubsetTests
         Assert.True(content.Contains("Tj") || content.Contains("TJ"), "Should contain text operations");
         Assert.True(endY < 800, "Y should move down after wrapping");
     }
+
+    [Fact]
+    public void TtfFontReader_StaysAliveAfterConstruction()
+    {
+        if (!File.Exists(TestFontPath)) return;
+
+        // Arrange
+        using var fontStream = File.OpenRead(TestFontPath);
+        using var reader = new TtfFontReader(fontStream);
+
+        // Act: these methods read from _reader.BaseStream, which used to be disposed
+        // too early (the ctor wrapped its MemoryStream in 'using').
+        var offset0 = reader.GetGlyphRawData(0);
+        var longOffsets = GetLongOffsetsViaReflection(reader);
+
+        // Assert
+        Assert.NotNull(offset0);
+    }
+
+    [Fact]
+    public void TtfFontReader_EmbeddedFontSubset_DoesNotThrowOnUsedGlyphs()
+    {
+        if (!File.Exists(TestFontPath)) return;
+
+        // Arrange
+        var doc = new PdfDocument();
+        using var fontStream = File.OpenRead(TestFontPath);
+        var font = doc.Fonts.AddEmbedded(fontStream, "RobustFont");
+
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawText("Hello World", 50, 800, font, 12);
+
+        // Act + Assert: Save triggers subsetting + GetGlyphRawData for every used glyph.
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        Assert.True(ms.Length > 0);
+    }
+
+    private static bool GetLongOffsetsViaReflection(TtfFontReader reader)
+    {
+        // Accesses the private GetLongOffsets which reads _reader.BaseStream.Position.
+        var method = typeof(TtfFontReader).GetMethod("GetLongOffsets",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        return (bool)method.Invoke(reader, Array.Empty<object>())!;
+    }
 }

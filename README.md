@@ -1,65 +1,64 @@
 # PdfDotNet
 
-Eigene Open-Source-Bibliothek für C# (.NET 10) zur Erzeugung von PDF-Dokumenten (PDF 1.7), als Ersatz für PdfSharp nach Einführung des Dual-Licensing.
+Own open-source library for C# (.NET 10) to generate PDF documents (PDF 1.7), as a replacement for PdfSharp after the introduction of dual-licensing.
 
-## Prinzipien
+## Principles
 
-- Nur .NET 10, rein managed C#, keine Native-Abhängigkeiten
-- Cross-Plattform (Windows, Linux, macOS)
+- .NET 10 only, purely managed C#, no native dependencies
+- Cross-platform (Windows, Linux, macOS)
 - PDF 1.7 (ISO 32000-1)
-- Lizenz: MIT
-- NuGet-Paket: `PdfDotNet`, Namespace: `pdfdotnet`
-- Streaming-first: Seiten werden während des Schreibens in den Stream geschrieben (O(1 Seite) statt O(alle Seiten) im RAM)
+- License: MIT
+- NuGet package: `PdfDotNet`, namespace: `pdfdotnet`
+- Streaming-first: pages are written to the stream while writing (O(1 page) instead of O(all pages) in RAM)
 
 ## Installation
 
-Die Bibliothek ist noch nicht auf NuGet veröffentlicht. Lokal bauen und referenzieren:
+The library is not yet published on NuGet. Build and reference locally:
 
 ```bash
 dotnet build src/PdfDotNet/PdfDotNet.csproj
 ```
 
-## Schnellstart
+## Quick Start
 
 ```csharp
 using pdfdotnet;
 
-// Dokument erstellen
+// Create document
 var doc = new PdfDocument();
-doc.Info.Title = "Rechnung";
-doc.Info.Author = "Max Mustermann";
+doc.Info.Title = "Invoice";
+doc.Info.Author = "John Doe";
 
-// Seite hinzufügen (A4, Letter, A3, A5, Legal oder Custom)
+// Add page (A4, Letter, A3, A5, Legal or Custom)
 var page = doc.AddPage(PdfPaperSize.A4);
 
-// Text zeichnen
-page.DrawText("Hallo Welt", 50, 800, PdfFont.Helvetica, 12);
+// Draw text
+page.DrawText("Hello World", 50, 800, PdfFont.Helvetica, 12);
 
-// Linie
+// Line
 page.DrawLine(50, 750, 550, 750);
 
-// Rechteck (Umrandung)
+// Rectangle (outline)
 page.DrawRectangle(50, 700, 100, 50);
 
-// Gefülltes Rechteck
+// Filled rectangle
 page.DrawRectangleFilled(50, 650, 100, 50);
 
-// Bild einbetten
+// Embed image
 var image = PdfImage.FromBytes("logo", jpegBytes);
-page.DrawImage(image, 50, 500, 200, 150);
 
-// TTF-Schriftart einbetten (mit echtem Glyphen-Subsetting)
+// Embed TTF font (with real glyph subsetting)
 using var fontStream = File.OpenRead("LiberationSans-Regular.ttf");
 var font = doc.Fonts.AddEmbedded(fontStream, "LiberationSans");
-page.DrawText("Eingebettete Schrift", 50, 400, font, 14);
+page.DrawText("Embedded font", 50, 400, font, 14);
 
-// Speichern (existierende Datei wird überschrieben)
-doc.Save("ausgabe.pdf");
+// Save (existing file is overwritten)
+doc.Save("output.pdf");
 ```
 
-## Koordinatensystem
+## Coordinate System
 
-Standardmäßig gilt das PDF-Standard-Koordinatensystem (Ursprung unten links, Y wächst nach oben). Über `PdfDocumentOptions` kann auf oben-links umgestellt werden:
+By default the standard PDF coordinate system applies (origin bottom left, Y grows upward). Via `PdfDocumentOptions` it can be switched to top-left:
 
 ```csharp
 var doc = new PdfDocument
@@ -68,7 +67,7 @@ var doc = new PdfDocument
 };
 ```
 
-## Tabelle
+## Table
 
 ```csharp
 var table = new PdfTable
@@ -82,62 +81,71 @@ var table = new PdfTable
 };
 
 table.AddColumn("Name", 100);
-table.AddColumn("Wert", 80);
+table.AddColumn("Value", 80);
 table.AddColumn("Status", 60);
 
-table.AddRow("Alice", "100 €", "Aktiv");
-table.AddRow("Bob", "200 €", "Inaktiv");
-table.AddRow("Charlie mit sehr langem Namen, der umbrechen muss", "50 €", "Aktiv");
+table.AddRow("Alice", "100 €", "Active");
+table.AddRow("Bob", "200 €", "Inactive");
+table.AddRow("Charlie with a very long name that needs wrapping", "50 €", "Active");
 
-// Tabelle zeichnen (läuft bei Bedarf auf mehrere Seiten, Header wiederholt sich)
+// Draw table (continues on multiple pages if needed, header repeats)
 page.DrawTable(table, 50, 800);
 ```
 
-## Text-Umbrechung
+## Text Wrapping
 
 ```csharp
 double endY = page.DrawWrappedText(
-    "Dies ist ein langer Text, der automatisch in mehrere Zeilen umbrochen wird.",
+    "This is a long text that is automatically wrapped into multiple lines.",
     50, 800, 200, PdfFont.Helvetica, 12
 );
 ```
 
-## Streaming für große Dokumente
+## Streaming for large documents
 
-Seit v0.5 wird jede Seite unmittelbar in den Ziel-Stream geschrieben. Der Speicherbedarf ist also unabhängig von der Seitenanzahl:
+Since v0.5 every page is written immediately to the target stream. Memory usage is therefore independent of the page count:
 
 ```csharp
 var doc = new PdfDocument();
 for (int i = 0; i < 10000; i++)
 {
     var page = doc.AddPage(PdfPaperSize.A4);
-    page.DrawText($"Seite {i + 1}", 50, 800, PdfFont.Helvetica, 10);
+    page.DrawText($"Page {i + 1}", 50, 800, PdfFont.Helvetica, 10);
 }
-doc.Save("grosses-dokument.pdf"); // speicherfreundlich
+doc.Save("large-document.pdf"); // memory-friendly
 ```
 
-## Projektstruktur
+## Project Structure
 
 ```
-src/PdfDotNet/          Implementierungsbibliothek (.NET 10)
-  PdfDocument.cs        Einstiegspunkt, Save(), Zwei-Pass-Objekt-Schreibung
-  PdfPage.cs            Seite, DrawText, DrawLine, DrawRectangle, DrawImage, DrawTable
-  PdfTable.cs           Tabellen-Modell (PdfTable, PdfColumn, PdfRow)
-  PdfFont.cs            Base-14-Schriftarten
-  PdfEmbeddedFont.cs    Eingebettete TTF-Schriftarten mit Subsetting
-  Font/TtfFontReader.cs TTF-Tabellen-Parser (head, maxp, hhea, hmtx, glyf, loca, cmap)
-  Font/TtfSubsetBuilder.cs Echter Glyphen-Subset-TTF-Baukasten
-  PdfObjectWriter.cs    PDF-Indirektobjekte, XRef, Trailer, Startxref
-  PdfImage.cs           Bild-XObject (PNG/JPEG-Erkennung)
-tests/PdfDotNet.Tests/  xunit.v3-Tests (alle grün)
+src/PdfDotNet/          Implementation library (.NET 10)
+  PdfDocument.cs        Entry point, Save(), two-pass object writing
+  PdfPage.cs            Page, DrawText, DrawLine, DrawRectangle, DrawImage, DrawTable
+  PdfTable.cs           Table model (PdfTable, PdfColumn, PdfRow)
+  PdfFont.cs            Base-14 fonts
+  PdfEmbeddedFont.cs    Embedded TTF fonts with subsetting
+  Font/TtfFontReader.cs TTF table parser (head, maxp, hhea, hmtx, glyf, loca, cmap)
+  Font/TtfSubsetBuilder.cs Real glyph subset TTF builder
+  PdfObjectWriter.cs    PDF indirect objects, XRef, Trailer, Startxref
+  PdfImage.cs           Image XObject (PNG/JPEG detection)
+tests/PdfDotNet.Tests/  xunit.v3 tests (all green)
 ```
 
-## Lizenz
+## License
 
-MIT — so offen wie möglich.
+MIT — as open as possible.
 
 ## Roadmap
 
-- v0.8: `PdfColor`-Tabellen, Links/Annotationen
-- v0.9: PDF/A-Konformität, digitale Signaturen
-- v1.0: Stabile API, NuGet-Paket
+- v0.8: `PdfColor` tables, links/annotations
+- v0.9: PDF/A compliance, digital signatures
+- v1.0: Stable API, NuGet package
+
+## Known limitations / planned milestones
+
+The following items were identified while recreating the `old_data/` reference PDFs and hinder a visually exact match:
+
+- **Form XObject rendering** — The reference PDFs embed form XObjects (`/Fm0`, zeiss-icon header, 24×24 icon) that PdfDotNet cannot draw yet. Add `/Form` XObject rendering support.
+- **Missing source image** — `20261104-Etiketten_Optikteile.pdf` references a 501×496 image that is not present in `old_data/images/` (only `zeiss-icon.png` 80×80 is available). The recreation uses `zeiss-icon.png` as a placeholder.
+- **No text measurement API** — There is no public API to measure text width for embedded fonts, making precise column positioning manual. Expose glyph-width measurement.
+

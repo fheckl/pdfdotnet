@@ -19,3 +19,6 @@ obj/
 # Test fonts (do not commit licensed font binaries)
 testassets/*.ttf
 testassets/*.otf
+
+# Reference data and generated PDFs (do not commit)
+old_data/

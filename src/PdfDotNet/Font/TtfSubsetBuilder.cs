@@ -12,22 +12,16 @@ internal static class TtfSubsetBuilder
 {
     public static byte[] Build(TtfFontReader reader, IReadOnlyDictionary<char, byte> glyphMap)
     {
-        // ---- 1. Determine which old glyph IDs are needed (0 = .notdef is always included) ----
-        var usedOldIds = new HashSet<ushort> { 0 };
+        // ---- 1. Map old glyph ID -> new glyph ID (0 = .notdef, then 1..N) ----
+        // Must use the same indices as glyphMap (assigned in CreateSubset in character order)
+        // so the content stream's glyph IDs match the subset font's glyph ordering.
+        var oldToNew = new Dictionary<ushort, byte> { [0] = 0 };
         foreach (var kvp in glyphMap)
         {
             if (kvp.Value != 0 && reader.Cmap.TryGetValue(kvp.Key, out ushort oldId))
             {
-                usedOldIds.Add(oldId);
+                oldToNew[oldId] = kvp.Value;
             }
-        }
-
-        // ---- 2. Map old glyph ID -> new glyph ID (0 = .notdef, then 1..N) ----
-        var oldToNew = new Dictionary<ushort, byte> { [0] = 0 };
-        byte newId = 1;
-        foreach (var oldId in usedOldIds.Where(id => id != 0).OrderBy(id => id))
-        {
-            oldToNew[oldId] = newId++;
         }
 
         // ---- 3. Collect raw glyf data and metrics per new glyph ID ----
@@ -218,7 +212,7 @@ internal static class TtfSubsetBuilder
         foreach (var e in entries) WriteUInt16BE(bw, e.code);
         WriteUInt16BE(bw, 0xFFFF); // terminator
 
-        bw.Write((byte)0); // reservedPad
+        bw.Write(new byte[2]); // reservedPad (2 bytes for alignment)
 
         // startCode
         foreach (var e in entries) WriteUInt16BE(bw, e.code);

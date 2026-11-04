@@ -20,6 +20,7 @@ public sealed class PdfPage
     private readonly List<PdfTextOperation> _textOperations = new();
     private readonly Dictionary<PdfFont, string> _fontNames = new();
     private readonly Dictionary<PdfImage, string> _imageNames = new();
+    private readonly List<PdfLinkAnnotation> _linkAnnotations = new();
     private int _fontCounter = 1;
     private int _imageCounter = 1;
 
@@ -47,11 +48,27 @@ public sealed class PdfPage
     public void DrawText(string text, double x, double y, PdfFont font, double size,
         double r = 0, double g = 0, double b = 0)
     {
+        DrawText(text, x, y, font, size, PdfColor.FromRgb(r, g, b));
+    }
+
+    /// <summary>
+    /// Draws text on the page.
+    /// </summary>
+    /// <param name="text">The text to output.</param>
+    /// <param name="x">X coordinate (from left).</param>
+    /// <param name="y">Y coordinate. With <see cref="PdfCoordinateSystem.BottomLeft"/> measured from
+    /// bottom edge, with <see cref="PdfCoordinateSystem.TopLeft"/> from top edge.</param>
+    /// <param name="font">The font to use.</param>
+    /// <param name="size">Font size in PDF points.</param>
+    /// <param name="color">Text color. Default: black.</param>
+    public void DrawText(string text, double x, double y, PdfFont font, double size, PdfColor color)
+    {
         if (string.IsNullOrEmpty(text)) return;
         if (font == null) throw new ArgumentNullException(nameof(font));
         if (size <= 0) throw new ArgumentOutOfRangeException(nameof(size));
+        if (color == null) throw new ArgumentNullException(nameof(color));
 
-        _textOperations.Add(new PdfTextOperation(text, font, size, x, y, r, g, b));
+        _textOperations.Add(new PdfTextOperation(text, font, size, x, y, color.R, color.G, color.B));
     }
 
     /// <summary>
@@ -150,6 +167,21 @@ public sealed class PdfPage
     }
 
     /// <summary>
+    /// Draws a straight line with the specified stroke color.
+    /// </summary>
+    /// <param name="x1">Start X.</param>
+    /// <param name="y1">Start Y.</param>
+    /// <param name="x2">End X.</param>
+    /// <param name="y2">End Y.</param>
+    /// <param name="color">Stroke color.</param>
+    public void DrawLine(double x1, double y1, double x2, double y2, PdfColor color)
+    {
+        if (color == null) throw new ArgumentNullException(nameof(color));
+        _content.SetStrokeColor(color.R, color.G, color.B);
+        DrawLine(x1, y1, x2, y2);
+    }
+
+    /// <summary>
     /// Draws a rectangle outline.
     /// </summary>
     /// <param name="x">Left X.</param>
@@ -169,6 +201,21 @@ public sealed class PdfPage
     }
 
     /// <summary>
+    /// Draws a rectangle outline with the specified stroke color.
+    /// </summary>
+    /// <param name="x">Left X.</param>
+    /// <param name="y">Bottom Y (TopLeft: top Y).</param>
+    /// <param name="width">Width.</param>
+    /// <param name="height">Height.</param>
+    /// <param name="color">Stroke color.</param>
+    public void DrawRectangle(double x, double y, double width, double height, PdfColor color)
+    {
+        if (color == null) throw new ArgumentNullException(nameof(color));
+        _content.SetStrokeColor(color.R, color.G, color.B);
+        DrawRectangle(x, y, width, height);
+    }
+
+    /// <summary>
     /// Draws a filled rectangle.
     /// </summary>
     /// <param name="x">Left X.</param>
@@ -184,6 +231,21 @@ public sealed class PdfPage
 
         _content.Rectangle(x, rectY, width, height);
         _content.Fill();
+    }
+
+    /// <summary>
+    /// Draws a filled rectangle with the specified fill color.
+    /// </summary>
+    /// <param name="x">Left X.</param>
+    /// <param name="y">Bottom Y (TopLeft: top Y).</param>
+    /// <param name="width">Width.</param>
+    /// <param name="height">Height.</param>
+    /// <param name="color">Fill color.</param>
+    public void DrawRectangleFilled(double x, double y, double width, double height, PdfColor color)
+    {
+        if (color == null) throw new ArgumentNullException(nameof(color));
+        _content.SetFillColor(color.R, color.G, color.B);
+        DrawRectangleFilled(x, y, width, height);
     }
 
     /// <summary>
@@ -208,6 +270,57 @@ public sealed class PdfPage
         string imageName = GetImageName(image);
 
         _content.Raw($"q {Format(width)} 0 0 {Format(height)} {Format(x)} {Format(imgY)} cm /{imageName} Do Q");
+    }
+
+    /// <summary>
+    /// Adds a clickable link annotation to the page.
+    /// </summary>
+    /// <param name="link">The link annotation to add.</param>
+    public void AddLinkAnnotation(PdfLinkAnnotation link)
+    {
+        if (link == null) throw new ArgumentNullException(nameof(link));
+        _linkAnnotations.Add(link);
+    }
+
+    /// <summary>
+    /// Adds a URI link annotation (opens an external URL when clicked).
+    /// </summary>
+    /// <param name="x">Left X of the clickable area.</param>
+    /// <param name="y">Y of the clickable area (bottom edge in BottomLeft, top edge in TopLeft).</param>
+    /// <param name="width">Width of the clickable area.</param>
+    /// <param name="height">Height of the clickable area.</param>
+    /// <param name="uri">Target URI.</param>
+    public void AddUriLink(double x, double y, double width, double height, string uri)
+    {
+        if (string.IsNullOrEmpty(uri)) throw new ArgumentNullException(nameof(uri));
+        _linkAnnotations.Add(new PdfUriLink(AdjustRect(x, y, width, height), uri));
+    }
+
+    /// <summary>
+    /// Adds a page link annotation (jumps to another page of the same document when clicked).
+    /// </summary>
+    /// <param name="x">Left X of the clickable area.</param>
+    /// <param name="y">Y of the clickable area (bottom edge in BottomLeft, top edge in TopLeft).</param>
+    /// <param name="width">Width of the clickable area.</param>
+    /// <param name="height">Height of the clickable area.</param>
+    /// <param name="destinationPage">Target page within this document.</param>
+    public void AddPageLink(double x, double y, double width, double height, PdfPage destinationPage)
+    {
+        if (destinationPage == null) throw new ArgumentNullException(nameof(destinationPage));
+        _linkAnnotations.Add(new PdfPageLink(AdjustRect(x, y, width, height), destinationPage));
+    }
+
+    /// <summary>
+    /// Converts a rectangle given in document coordinates to PDF space (bottom-left origin),
+    /// honoring the document's <see cref="PdfCoordinateSystem"/>.
+    /// </summary>
+    private PdfRect AdjustRect(double x, double y, double width, double height)
+    {
+        double yAdj = AdjustY(y);
+        double bottom = _document.Options.CoordinateSystem == PdfCoordinateSystem.TopLeft
+            ? yAdj - height
+            : yAdj;
+        return new PdfRect(x, bottom, width, height);
     }
 
     /// <summary>
@@ -381,7 +494,11 @@ public sealed class PdfPage
     /// <summary>
     /// Measures the width of a text string in PDF points.
     /// </summary>
-    private double MeasureTextWidth(string text, PdfFont font, double size)
+    /// <param name="text">The text to measure.</param>
+    /// <param name="font">The font to use.</param>
+    /// <param name="size">Font size in PDF points.</param>
+    /// <returns>The width of the text in PDF points.</returns>
+    public double MeasureTextWidth(string text, PdfFont font, double size)
     {
         double width = 0;
         if (_document.Fonts.Embedded.TryGetValue(font, out var embedded))
@@ -554,6 +671,7 @@ public sealed class PdfPage
     internal IReadOnlyDictionary<PdfFont, string> FontNames => _fontNames;
     internal IReadOnlyDictionary<PdfImage, string> ImageNames => _imageNames;
     internal IReadOnlyList<PdfTextOperation> TextOperations => _textOperations;
+    internal IReadOnlyList<PdfLinkAnnotation> LinkAnnotations => _linkAnnotations;
 
     private static string Format(double value)
     {

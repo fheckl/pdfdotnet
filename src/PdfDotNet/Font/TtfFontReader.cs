@@ -15,8 +15,10 @@ internal sealed class TtfFontReader : IDisposable
     public TtfFontReader(Stream stream)
     {
         _fontData = ReadAllBytes(stream);
-        using var ms = new MemoryStream(_fontData);
-        _reader = new BinaryReader(ms);
+        // Do not wrap in 'using': the MemoryStream must stay alive for the lifetime of
+        // this reader (GetGlyphRawData / GetLongOffsets read from _reader.BaseStream).
+        // BinaryReader.Dispose() will dispose the underlying MemoryStream.
+        _reader = new BinaryReader(new MemoryStream(_fontData));
         ReadOffsetTable();
         ReadTableDirectory();
     }
@@ -152,18 +154,26 @@ internal sealed class TtfFontReader : IDisposable
         return ReadInt16(_reader) != 0;
     }
 
-    private ushort GetGlyphOffset(ushort glyphId, bool longOffsets)
+    private uint GetGlyphOffset(ushort glyphId, bool longOffsets)
     {
         if (!_tables.TryGetValue("loca", out var loca)) return 0;
-        _reader.BaseStream.Position = loca.Offset + (longOffsets ? (uint)(glyphId * 4) : (uint)(glyphId * 2));
-        return longOffsets ? (ushort)ReadUInt32(_reader) : ReadUInt16(_reader);
+        uint locaPos = loca.Offset + (longOffsets ? (uint)(glyphId * 4) : (uint)(glyphId * 2));
+        if (locaPos + (longOffsets ? 4u : 2u) > (uint)_fontData.Length) return 0;
+        _reader.BaseStream.Position = locaPos;
+        // Short loca format stores offset/2 per the TrueType spec.
+        // Long offset format stores absolute offsets (keep as uint to avoid truncation).
+        return longOffsets ? ReadUInt32(_reader) : (uint)(ReadUInt16(_reader) * 2);
     }
 
     /// <summary>
     /// Returns the raw glyf bytes for a glyph (including its header: contours, bounds, etc.).
+    /// Returns an empty array if the glyph is missing, empty, or its offsets are out of range.
     /// </summary>
     public byte[] GetGlyphRawData(ushort glyphId)
     {
+        // Reject out-of-range glyph IDs (can happen with malformed cmap delta encoding)
+        if (glyphId >= NumGlyphs) return Array.Empty<byte>();
+
         if (!_tables.TryGetValue("glyf", out var glyf) ||
             !_tables.TryGetValue("loca", out var loca))
         {
@@ -172,19 +182,23 @@ internal sealed class TtfFontReader : IDisposable
 
         bool longOffsets = GetLongOffsets();
         uint locaPos = loca.Offset + (longOffsets ? (uint)(glyphId * 4) : (uint)(glyphId * 2));
+        if (locaPos + (longOffsets ? 4u : 2u) > (uint)_fontData.Length) return Array.Empty<byte>();
 
         _reader.BaseStream.Position = locaPos;
-        uint start = longOffsets ? ReadUInt32(_reader) : ReadUInt16(_reader);
+        // Short loca format stores offset/2 per the TrueType spec.
+        uint start = longOffsets ? ReadUInt32(_reader) : (uint)(ReadUInt16(_reader) * 2);
 
         _reader.BaseStream.Position = locaPos + (longOffsets ? 4u : 2u);
-        uint end = longOffsets ? ReadUInt32(_reader) : ReadUInt16(_reader);
+        uint end = longOffsets ? ReadUInt32(_reader) : (uint)(ReadUInt16(_reader) * 2);
 
         if (end <= start) return Array.Empty<byte>();
 
         uint absStart = glyf.Offset + start;
         uint absEnd = glyf.Offset + end;
-        uint length = absEnd - absStart;
+        if (absEnd > (uint)_fontData.Length) absEnd = (uint)_fontData.Length;
+        if (absStart >= absEnd) return Array.Empty<byte>();
 
+        uint length = absEnd - absStart;
         _reader.BaseStream.Position = absStart;
         return _reader.ReadBytes((int)length);
     }
@@ -215,9 +229,21 @@ internal sealed class TtfFontReader : IDisposable
             uint end = baseOffset + offsets[i + 1];
             if (end <= start) continue;
 
-            _reader.BaseStream.Position = start;
-            SimpleGlyph? glyph = ReadSimpleGlyph(start);
-            Glyphs[i] = glyph;
+            // Be lenient: a single malformed glyph must not break the whole font.
+            try
+            {
+                _reader.BaseStream.Position = start;
+                SimpleGlyph? glyph = ReadSimpleGlyph(start);
+                Glyphs[i] = glyph;
+            }
+            catch (EndOfStreamException)
+            {
+                Glyphs[i] = null; // skip unreadable glyph
+            }
+            catch (IOException)
+            {
+                Glyphs[i] = null; // skip unreadable glyph
+            }
         }
     }
 
@@ -230,7 +256,14 @@ internal sealed class TtfFontReader : IDisposable
         }
         ushort numberOfContours = (ushort)numContoursRaw;
 
-        _reader.ReadBytes(8); // xMin, yMin, xMax, yMax
+        // Glyph with no contours (e.g. space) — nothing to read.
+        if (numberOfContours == 0)
+        {
+            return new SimpleGlyph(0, Array.Empty<ushort>(), Array.Empty<byte>(), Array.Empty<ushort>(), Array.Empty<ushort>());
+        }
+
+        ReadRemaining(_reader, 8); // xMin, yMin, xMax, yMax
+        _reader.ReadBytes(8);
 
         ushort[] endPts = new ushort[numberOfContours];
         for (int i = 0; i < numberOfContours; i++)
@@ -239,16 +272,24 @@ internal sealed class TtfFontReader : IDisposable
         }
 
         ushort instructionLength = ReadUInt16(_reader);
+        ReadRemaining(_reader, instructionLength);
         _reader.ReadBytes(instructionLength);
 
         uint totalPoints = (uint)(endPts[^1] + 1);
+        // Sanity-check totalPoints against remaining data to avoid huge allocations.
+        uint remaining = (uint)(_reader.BaseStream.Length - _reader.BaseStream.Position);
+        if (totalPoints > remaining * 2 + 16)
+        {
+            return null; // glyph data is malformed
+        }
+
         byte[] flags = new byte[totalPoints];
         ushort[] xCoords = new ushort[totalPoints];
         ushort[] yCoords = new ushort[totalPoints];
 
         for (uint i = 0; i < totalPoints; i++)
         {
-            byte flag = _reader.ReadByte();
+            byte flag = ReadByteChecked(_reader);
             flags[i] = flag;
             if ((flag & 0x08) != 0)
             {
@@ -280,7 +321,7 @@ internal sealed class TtfFontReader : IDisposable
             }
             else
             {
-                byte val = _reader.ReadByte();
+                byte val = ReadByteChecked(_reader);
                 x += (flag & 0x04) != 0 ? val : (short)(-val);
                 xCoords[xRead] = (ushort)x;
                 xRead++;
@@ -306,7 +347,7 @@ internal sealed class TtfFontReader : IDisposable
             }
             else
             {
-                byte val = _reader.ReadByte();
+                byte val = ReadByteChecked(_reader);
                 y += (flag & 0x08) != 0 ? val : (short)(-val);
                 yCoords[yRead] = (ushort)y;
                 yRead++;
@@ -314,6 +355,20 @@ internal sealed class TtfFontReader : IDisposable
         }
 
         return new SimpleGlyph(numberOfContours, endPts, flags, xCoords, yCoords);
+    }
+
+    private static byte ReadByteChecked(BinaryReader reader)
+    {
+        if (reader.BaseStream.Position >= reader.BaseStream.Length)
+            throw new EndOfStreamException("Unexpected end of font data while reading glyph.");
+        return reader.ReadByte();
+    }
+
+    private static void ReadRemaining(BinaryReader reader, int count)
+    {
+        if (count < 0) return;
+        if (reader.BaseStream.Position + count > reader.BaseStream.Length)
+            throw new EndOfStreamException("Unexpected end of font data while reading glyph.");
     }
 
     private void ReadCmap()
@@ -340,14 +395,15 @@ internal sealed class TtfFontReader : IDisposable
         if (bestOffset < 0) return;
 
         _reader.BaseStream.Position = cmap.Offset + bestOffset;
-        ushort cmapVersion = ReadUInt16(_reader);
-        ushort numSegmentsX2 = ReadUInt16(_reader);
+        ushort cmapVersion = ReadUInt16(_reader); // format
+        _reader.ReadBytes(4); // skip length + language
+        ushort numSegmentsX2 = ReadUInt16(_reader); // segCountX2
         ushort numSegments = (ushort)(numSegmentsX2 / 2);
-        _reader.ReadBytes(6);
+        _reader.ReadBytes(6); // searchRange, entrySelector, rangeShift
 
         ushort[] endCode = new ushort[numSegments];
         for (int i = 0; i < numSegments; i++) endCode[i] = ReadUInt16(_reader);
-        _reader.ReadBytes(2);
+        _reader.ReadBytes(2); // reservedPad (2 bytes per TrueType spec for alignment)
 
         ushort[] startCode = new ushort[numSegments];
         for (int i = 0; i < numSegments; i++) startCode[i] = ReadUInt16(_reader);
@@ -358,7 +414,7 @@ internal sealed class TtfFontReader : IDisposable
         ushort[] idRangeOffset = new ushort[numSegments];
         for (int i = 0; i < numSegments; i++) idRangeOffset[i] = ReadUInt16(_reader);
 
-        uint glyphIdArrayStart = (uint)(cmap.Offset + bestOffset + 10 + numSegmentsX2 + 2 + numSegmentsX2 + numSegmentsX2 + numSegmentsX2);
+        uint glyphIdArrayStart = (uint)(cmap.Offset + bestOffset + 16 + numSegmentsX2 + numSegmentsX2 + numSegmentsX2 + numSegmentsX2);
 
         for (int i = 0; i < numSegments; i++)
         {

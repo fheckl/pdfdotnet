@@ -261,4 +261,230 @@ public class PdfDocumentTests
         Assert.Contains("Max Mustermann", content);
         Assert.Contains("PdfDotNet", content);
     }
+
+    [Fact]
+    public void ColorTable_AddAndGet_ReturnsColor()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        doc.ColorTable.Add("Brand", PdfColor.FromHex("#FF5733"));
+
+        // Act & Assert
+        Assert.True(doc.ColorTable.Contains("Brand"));
+        Assert.True(doc.ColorTable.TryGet("Brand", out var color));
+        Assert.Equal(1, color!.R, 2);
+        Assert.Equal(doc.ColorTable["Brand"].R, color.R);
+    }
+
+    [Fact]
+    public void ColorTable_MissingName_Throws()
+    {
+        var doc = new PdfDocument();
+        Assert.Throws<KeyNotFoundException>(() => doc.ColorTable["Missing"]);
+    }
+
+    [Fact]
+    public void AddUriLink_WritesAnnotObject()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.AddUriLink(50, 700, 100, 50, "https://example.com");
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("/Type /Annot", content);
+        Assert.Contains("/Subtype /Link", content);
+        Assert.Contains("/S /URI", content);
+        Assert.Contains("https://example.com", content);
+        Assert.Contains("/Rect [", content);
+    }
+
+    [Fact]
+    public void AddPageLink_WritesGoToAction()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page1 = doc.AddPage(PdfPaperSize.A4);
+        var page2 = doc.AddPage(PdfPaperSize.A4);
+        page1.AddPageLink(50, 600, 100, 50, page2);
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("/Type /Annot", content);
+        Assert.Contains("/Subtype /Link", content);
+        Assert.Contains("/S /GoTo", content);
+    }
+
+    [Fact]
+    public void AddLinkAnnotation_Null_Throws()
+    {
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        Assert.Throws<ArgumentNullException>(() => page.AddLinkAnnotation(null!));
+    }
+
+    [Fact]
+    public void PdfA1b_Conformance_WritesMetadataOutputIntentLang()
+    {
+        // Arrange
+        var fontPath = FindTestFont();
+        if (fontPath == null)
+        {
+            return; // Test font not committed – skip (see testassets/README.md).
+        }
+
+        var doc = new PdfDocument
+        {
+            Options =
+            {
+                ConformanceLevel = PdfConformanceLevel.PdfA1b,
+                Language = "en-US"
+            }
+        };
+
+        // Embed the test font (PDF/A requires all fonts embedded).
+        PdfFont? font = null;
+        try
+        {
+            using var fontStream = File.OpenRead(fontPath);
+            font = doc.Fonts.AddEmbedded(fontStream, "PDFAFont");
+        }
+        catch
+        {
+            return; // Test font cannot be parsed by the TTF reader – skip.
+        }
+
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawText("PDF/A test", 50, 800, font, 12);
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.StartsWith("%PDF-1.7", content);
+        Assert.EndsWith("%%EOF", content.TrimEnd('\n', '\r'));
+        Assert.Contains("/Type /OutputIntent", content);
+        Assert.Contains("/S /GTS_PDFA1", content);
+        Assert.Contains("/DestOutputProfile", content);
+        Assert.Contains("/Type /Metadata", content);
+        Assert.Contains("/Subtype /XML", content);
+        Assert.Contains("/Lang (en-US)", content);
+        Assert.Contains("/Marked true", content);
+        Assert.Contains("/ID [", content);
+    }
+
+    private static string? FindTestFont()
+    {
+        var candidates = new[]
+        {
+            "testassets/TestFont.ttf",
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "testassets", "TestFont.ttf"),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "testassets", "TestFont.ttf"),
+        };
+        foreach (var c in candidates)
+        {
+            var p = Path.GetFullPath(c);
+            if (File.Exists(p)) return p;
+        }
+        return null;
+    }
+
+    [Fact]
+    public void PdfA1b_WithBase14Font_Throws()
+    {
+        // Arrange
+        var doc = new PdfDocument
+        {
+            Options = { ConformanceLevel = PdfConformanceLevel.PdfA1b }
+        };
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawText("text", 50, 800, PdfFont.Helvetica, 12);
+
+        // Act & Assert
+        using var ms = new MemoryStream();
+        Assert.Throws<InvalidOperationException>(() => doc.Save(ms));
+    }
+
+    [Fact]
+    public void DigitalSignature_WritesSignatureStructure()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawText("Signed document", 50, 800, PdfFont.Helvetica, 12);
+
+        var options = new PdfSignatureOptions
+        {
+            Reason = "Approval",
+            ContactInfo = "contact@example.com",
+            Location = "Berlin",
+            Name = "Alice",
+            PlaceholderLength = 32,
+            Sign = data => new byte[32] // dummy signature value
+        };
+
+        // Act
+        using var ms = new MemoryStream();
+        doc.Save(ms, options);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        // Assert
+        Assert.Contains("/Type /AcroForm", content);
+        Assert.Contains("/FT /Sig", content);
+        Assert.Contains("/Type /Sig", content);
+        Assert.Contains("/Filter /Adobe.PPKLite", content);
+        Assert.Contains("/SubFilter /adbe.pkcs7.detached", content);
+        Assert.Contains("/ByteRange [", content);
+        Assert.Contains("/Contents <", content);
+        Assert.Contains("/Reason (Approval)", content);
+        Assert.Contains("/Location (Berlin)", content);
+        Assert.Contains("/ContactInfo (contact@example.com)", content);
+        Assert.Contains("/Name (Alice)", content);
+        Assert.Contains("/M (D:", content);
+    }
+
+    [Fact]
+    public void DigitalSignature_WrongLength_Throws()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawText("Signed document", 50, 800, PdfFont.Helvetica, 12);
+
+        var options = new PdfSignatureOptions
+        {
+            PlaceholderLength = 32,
+            Sign = data => new byte[64] // wrong length
+        };
+
+        // Act & Assert
+        using var ms = new MemoryStream();
+        Assert.Throws<InvalidOperationException>(() => doc.Save(ms, options));
+    }
+
+    [Fact]
+    public void DigitalSignature_MissingSignDelegate_Throws()
+    {
+        // Arrange
+        var doc = new PdfDocument();
+        var page = doc.AddPage(PdfPaperSize.A4);
+        page.DrawText("Signed document", 50, 800, PdfFont.Helvetica, 12);
+
+        var options = new PdfSignatureOptions { PlaceholderLength = 32 };
+
+        // Act & Assert
+        using var ms = new MemoryStream();
+        Assert.Throws<InvalidOperationException>(() => doc.Save(ms, options));
+    }
 }

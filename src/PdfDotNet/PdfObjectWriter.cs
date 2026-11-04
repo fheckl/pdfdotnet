@@ -65,6 +65,14 @@ internal sealed class PdfObjectWriter
         WriteAscii($"{key} {value}\n");
     }
 
+    /// <summary>Writes a key/value entry where value is a hex string: /Key <hex>.</summary>
+    public void WriteKeyHex(string key, byte[] data)
+    {
+        WriteAscii($"{key} <");
+        foreach (byte b in data) WriteAscii($"{b:X2}");
+        WriteAscii(">\n");
+    }
+
     /// <summary>Writes raw ASCII content without forcing a line break.</summary>
     public void WriteRaw(string text)
     {
@@ -91,13 +99,23 @@ internal sealed class PdfObjectWriter
         }
     }
 
-    public void WriteTrailer(int size, int rootObj, int infoObj)
+    public void WriteTrailer(int size, int rootObj, int infoObj, byte[]? documentId = null)
     {
         WriteAscii("trailer\n");
         WriteAscii("<<");
         WriteAscii($" /Size {size}");
         WriteAscii($" /Root {rootObj} 0 R");
         if (infoObj != 0) WriteAscii($" /Info {infoObj} 0 R");
+        if (documentId != null)
+        {
+            WriteAscii(" /ID [");
+            WriteAscii("<");
+            foreach (byte b in documentId) WriteAscii($"{b:X2}");
+            WriteAscii("> ");
+            WriteAscii("<");
+            foreach (byte b in documentId) WriteAscii($"{b:X2}");
+            WriteAscii(">]");
+        }
         WriteAscii(" >>\n");
     }
 
