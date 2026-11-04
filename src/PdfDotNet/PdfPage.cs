@@ -608,13 +608,16 @@ public sealed class PdfPage
 
             if (glyphMaps.TryGetValue(op.Font, out var glyphMap))
             {
-                // Embedded font: emit glyph indices as bytes in a TJ array.
+                // Embedded font: emit character codes as bytes in a TJ array.
+                // With /Encoding /Identity-H, character code = CID. The cmap in the subset
+                // font maps Unicode code points (CIDs) to glyph IDs, so we write the
+                // Unicode code point here.
                 var ids = new List<byte>();
                 foreach (char c in op.Text)
                 {
                     if (glyphMap.TryGetValue(c, out byte glyphIndex))
                     {
-                        ids.Add(glyphIndex);
+                        ids.Add((byte)c);
                     }
                     else
                     {

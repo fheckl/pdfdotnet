@@ -83,7 +83,10 @@ public sealed class PdfEmbeddedFont : IDisposable
         sb.Append($"{entries.Count} beginbfchar\n");
         foreach (var kvp in entries)
         {
-            sb.Append($"<{kvp.Value:X2}><{(int)kvp.Key:X4}>\n");
+            // With /Encoding /Identity-H, character code = CID = Unicode code point.
+            // ToUnicode maps CID → Unicode code point, so we write an identity mapping:
+            // each Unicode code point maps to itself.
+            sb.Append($"<{(int)kvp.Key:X4}><{(int)kvp.Key:X4}>\n");
         }
         sb.Append("endbfchar\n");
         sb.Append("endcmap\n");
