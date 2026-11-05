@@ -78,11 +78,13 @@ public sealed class PdfEmbeddedFont : IDisposable
 
         if (GlyphMap.Count > 0)
         {
-            // Subset font: glyph ID → Unicode code point.
+            // Subset font: character code → Unicode code point.
+            // Content stream writes character codes (WinAnsi), cmap maps char code → glyph ID.
+            // ToUnicode maps character code → Unicode code point (identity for Latin-1).
             sb.Append($"{GlyphMap.Count} beginbfchar\n");
-            foreach (var kvp in GlyphMap.OrderBy(kvp => kvp.Value))
+            foreach (var kvp in GlyphMap.OrderBy(kvp => kvp.Key))
             {
-                sb.Append($"<{kvp.Value:X4}><{(int)kvp.Key:X4}>\n");
+                sb.Append($"<{(int)kvp.Key:X4}><{(int)kvp.Key:X4}>\n");
             }
         }
         else
