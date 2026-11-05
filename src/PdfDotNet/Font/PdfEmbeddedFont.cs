@@ -61,15 +61,10 @@ public sealed class PdfEmbeddedFont : IDisposable
     }
 
     /// <summary>
-    /// Builds a ToUnicode CMap that maps glyph IDs (CIDs in Identity-H encoding) to Unicode code points.
+    /// Builds a ToUnicode CMap.
     /// </summary>
     public byte[] BuildToUnicodeCMap()
     {
-        var entries = GlyphMap
-            .Where(kvp => kvp.Value > 0) // skip .notdef (glyph index 0)
-            .OrderBy(kvp => kvp.Value)
-            .ToList();
-
         var sb = new StringBuilder();
         sb.Append("%CIDInit\n");
         sb.Append("/CIDInit /ProcSet findresource begin\n");
@@ -80,12 +75,24 @@ public sealed class PdfEmbeddedFont : IDisposable
         sb.Append("/CMapType 2 def\n");
         sb.Append("1 begincodespacerange\n");
         sb.Append("<00><FF> endcodespacerange\n");
-        sb.Append($"{entries.Count} beginbfchar\n");
-        foreach (var kvp in entries)
+
+        if (GlyphMap.Count > 0)
         {
-            // With /Encoding /WinAnsiEncoding, character code = byte value = Unicode code point.
-            // ToUnicode maps character code → Unicode code point (identity mapping).
-            sb.Append($"<{(int)kvp.Key:X4}><{(int)kvp.Key:X4}>\n");
+            // Subset font: glyph ID → Unicode code point.
+            sb.Append($"{GlyphMap.Count} beginbfchar\n");
+            foreach (var kvp in GlyphMap.OrderBy(kvp => kvp.Value))
+            {
+                sb.Append($"<{kvp.Value:X4}><{(int)kvp.Key:X4}>\n");
+            }
+        }
+        else
+        {
+            // Full font: character code → Unicode code point (identity mapping).
+            sb.Append("256 beginbfchar\n");
+            for (int i = 0; i < 256; i++)
+            {
+                sb.Append($"<{i:X4}><{i:X4}>\n");
+            }
         }
         sb.Append("endbfchar\n");
         sb.Append("endcmap\n");
@@ -97,7 +104,10 @@ public sealed class PdfEmbeddedFont : IDisposable
     }
 
     /// <summary>
-    /// Creates an embedded font from a TTF stream. The reader is kept open for subsetting.
+    /// Creates an embedded font from a TTF stream.
+    /// The full font is embedded without subsetting so that the PDF's cmap and post table
+    /// remain consistent with the original font file. This ensures maximum compatibility
+    /// with PDF viewers.
     /// </summary>
     public static PdfEmbeddedFont Create(Stream ttfStream, string baseName)
     {
@@ -107,7 +117,8 @@ public sealed class PdfEmbeddedFont : IDisposable
         var reader = new TtfFontReader(ttfStream);
         string postScriptName = baseName.Replace(" ", string.Empty);
 
-        return new PdfEmbeddedFont(baseName, postScriptName, Array.Empty<byte>(),
+        // Embed the full font without subsetting.
+        return new PdfEmbeddedFont(baseName, postScriptName, reader.FontData,
             new Dictionary<char, byte>(), reader.Ascender, reader.Descender, reader.UnitsPerEm,
             new Dictionary<char, short>(), reader, reader.FontData);
     }

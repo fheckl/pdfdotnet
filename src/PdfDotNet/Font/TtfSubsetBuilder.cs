@@ -195,19 +195,11 @@ internal static class TtfSubsetBuilder
         WriteUInt16BE(bw, 258); // length = 256 + 2 + 2
         WriteUInt16BE(bw, 0); // language
 
-        // 256 glyph ID bytes, one per character code 0..255
+        // 256 glyph ID bytes: cmap[glyphID] = glyphID (identity mapping)
+        // With /Encoding /Identity-H, character code = glyph ID, so cmap[glyphID] = glyphID.
         for (int i = 0; i < 256; i++)
         {
-            byte glyphId = 0; // .notdef
-            foreach (var e in entries)
-            {
-                if (e.code == i)
-                {
-                    glyphId = e.newGlyphId;
-                    break;
-                }
-            }
-            bw.Write(glyphId);
+            bw.Write((byte)i);
         }
 
         return ms.ToArray();
