@@ -180,12 +180,6 @@ internal static class TtfSubsetBuilder
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
 
-        int segCount = entries.Count + 1; // +1 for the 0xFFFF terminator segment
-        int segCountX2 = segCount * 2;
-        int searchRange = 2 * (1 << (int)Math.Floor(System.Math.Log2(segCount)));
-        int entrySelector = (int)Math.Log2(searchRange / 2);
-        int rangeShift = 2 * segCount - searchRange;
-
         // cmap header
         WriteUInt16BE(bw, 0); // version
         WriteUInt16BE(bw, 1); // numTables
@@ -195,47 +189,26 @@ internal static class TtfSubsetBuilder
         uint cmapSubtableOffset = 6 + 8; // after header + 1 encoding record
         WriteUInt32BE(bw, cmapSubtableOffset);
 
-        // cmap subtable (format 4)
+        // cmap subtable (format 0: simple byte-to-glyph mapping table)
         bw.BaseStream.Position = cmapSubtableOffset;
-        WriteUInt16BE(bw, 4); // format
-        // length = 10 + 2*segCountX2 + glyphIdArraySize
-        // we compute length at the end; placeholder
-        int lengthPos = (int)bw.BaseStream.Position;
-        bw.Write(new byte[2]); // length placeholder
+        WriteUInt16BE(bw, 0); // format
+        WriteUInt16BE(bw, 258); // length = 256 + 2 + 2
         WriteUInt16BE(bw, 0); // language
-        WriteUInt16BE(bw, (ushort)segCountX2);
-        WriteUInt16BE(bw, (ushort)searchRange);
-        WriteUInt16BE(bw, (ushort)entrySelector);
-        WriteUInt16BE(bw, (ushort)rangeShift);
 
-        // endCode
-        foreach (var e in entries) WriteUInt16BE(bw, e.code);
-        WriteUInt16BE(bw, 0xFFFF); // terminator
-
-        bw.Write(new byte[2]); // reservedPad (2 bytes for alignment)
-
-        // startCode
-        foreach (var e in entries) WriteUInt16BE(bw, e.code);
-        WriteUInt16BE(bw, 0xFFFF);
-
-        // idDelta
-        foreach (var e in entries)
+        // 256 glyph ID bytes, one per character code 0..255
+        for (int i = 0; i < 256; i++)
         {
-            ushort delta = (ushort)((e.newGlyphId - e.code) & 0xFFFF);
-            WriteUInt16BE(bw, delta);
+            byte glyphId = 0; // .notdef
+            foreach (var e in entries)
+            {
+                if (e.code == i)
+                {
+                    glyphId = e.newGlyphId;
+                    break;
+                }
+            }
+            bw.Write(glyphId);
         }
-        WriteUInt16BE(bw, 1); // terminator delta
-
-        // idRangeOffset: 0 for all (delta-based)
-        for (int i = 0; i < segCount; i++) WriteUInt16BE(bw, 0);
-
-        // glyphIdArray: empty (all delta-based)
-
-        // Fix length
-        uint length = (uint)(bw.BaseStream.Position - cmapSubtableOffset);
-        bw.BaseStream.Position = lengthPos;
-        WriteUInt16BE(bw, (ushort)length);
-        bw.BaseStream.Position = bw.BaseStream.Length;
 
         return ms.ToArray();
     }
