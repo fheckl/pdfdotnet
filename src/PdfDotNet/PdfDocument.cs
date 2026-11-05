@@ -384,7 +384,7 @@ public sealed class PdfDocument : IDisposable
                 writer.WriteKey("/BaseFont", "/" + subset.PostScriptName);
                 writer.WriteKey("/FirstChar", "0");
                 writer.WriteKey("/LastChar", "255");
-                writer.WriteKey("/Encoding", "/WinAnsiEncoding");
+                writer.WriteKey("/Encoding", "/Identity-H");
                 var widths = BuildWidths(subset, charsForFont);
                 writer.WriteKey("/Widths", $"[{string.Join(" ", widths.Select(w => w.ToString()))}]");
                 writer.WriteKey("/FontDescriptor", $"{fontDescObj} 0 R");
