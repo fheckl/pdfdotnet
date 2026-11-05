@@ -867,7 +867,7 @@ public sealed class PdfDocument : IDisposable
             var width = advanceWidth > 0 && unitsPerEm > 0
                 ? (int)Math.Round(advanceWidth * 1000.0 / unitsPerEm)
                 : 500;
-            widths[glyphId] = width;
+            widths[c] = width; // Index by character code (WinAnsiEncoding), not glyph ID
         }
 
         return widths;
