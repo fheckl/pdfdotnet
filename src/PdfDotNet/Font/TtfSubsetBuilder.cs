@@ -190,16 +190,23 @@ internal static class TtfSubsetBuilder
         WriteUInt32BE(bw, cmapSubtableOffset);
 
         // cmap subtable (format 0: simple byte-to-glyph mapping table)
+        // Maps character code (WinAnsi = Unicode code point for Latin-1) → glyph ID.
         bw.BaseStream.Position = cmapSubtableOffset;
         WriteUInt16BE(bw, 0); // format
         WriteUInt16BE(bw, 258); // length = 256 + 2 + 2
         WriteUInt16BE(bw, 0); // language
 
-        // 256 glyph ID bytes: cmap[glyphID] = glyphID (identity mapping)
-        // With /Encoding /Identity-H, character code = glyph ID, so cmap[glyphID] = glyphID.
+        // Build glyph ID lookup: character code → glyph ID
+        var glyphIdByCode = new byte[256];
+        foreach (var e in entries)
+        {
+            if (e.code < 256)
+                glyphIdByCode[e.code] = e.newGlyphId;
+        }
+
         for (int i = 0; i < 256; i++)
         {
-            bw.Write((byte)i);
+            bw.Write(glyphIdByCode[i]);
         }
 
         return ms.ToArray();
