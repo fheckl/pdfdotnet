@@ -142,10 +142,10 @@ public sealed class PdfEmbeddedFont : IDisposable
         if (string.IsNullOrEmpty(baseName)) throw new ArgumentNullException(nameof(baseName));
 
         var reader = new TtfFontReader(ttfStream);
-        string postScriptName = baseName.Replace(" ", string.Empty);
+        string postScriptName = reader.ReadPostScriptName() ?? baseName.Replace(" ", string.Empty);
 
         // Embed the full font without subsetting.
-        return new PdfEmbeddedFont(baseName, postScriptName, reader.FontData,
+        return new PdfEmbeddedFont(postScriptName, postScriptName, reader.FontData,
             new Dictionary<char, byte>(), reader.Ascender, reader.Descender, reader.UnitsPerEm,
             new Dictionary<char, short>(), reader, reader.FontData);
     }

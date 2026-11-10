@@ -371,6 +371,50 @@ internal sealed class TtfFontReader : IDisposable
             throw new EndOfStreamException("Unexpected end of font data while reading glyph.");
     }
 
+    /// <summary>
+    /// Reads the PostScript font name from the name table (nameID=6).
+    /// Returns null if not found.
+    /// </summary>
+    public string? ReadPostScriptName()
+    {
+        if (!_tables.TryGetValue("name", out var name)) return null;
+        _reader.BaseStream.Position = name.Offset;
+        ushort format = ReadUInt16(_reader);
+        ushort count = ReadUInt16(_reader);
+        ushort stringOffset = ReadUInt16(_reader);
+
+        for (int i = 0; i < count; i++)
+        {
+            ushort platformID = ReadUInt16(_reader);
+            ushort encodingID = ReadUInt16(_reader);
+            ushort languageID = ReadUInt16(_reader);
+            ushort nameID = ReadUInt16(_reader);
+            ushort length = ReadUInt16(_reader);
+            ushort offset = ReadUInt16(_reader);
+
+            if (nameID == 6) // PostScript name
+            {
+                // Platform 3 (Windows), encodingID 1 (Unicode) is most common
+                if (platformID == 3 && encodingID == 1)
+                {
+                    _reader.BaseStream.Position = name.Offset + stringOffset + offset;
+                    byte[] bytes = _reader.ReadBytes(length);
+                    // UTF-16BE
+                    var sb = new System.Text.StringBuilder();
+                    for (int j = 0; j + 1 < bytes.Length; j += 2)
+                    {
+                        ushort ch = (ushort)((bytes[j] << 8) | bytes[j + 1]);
+                        if (ch > 0 && ch < 0xD800 || ch > 0xDFFF && ch < 0xFFFF)
+                            sb.Append((char)ch);
+                    }
+                    return sb.ToString();
+                }
+            }
+        }
+
+        return null;
+    }
+
     private void ReadCmap()
     {
         if (!_tables.TryGetValue("cmap", out var cmap)) return;
