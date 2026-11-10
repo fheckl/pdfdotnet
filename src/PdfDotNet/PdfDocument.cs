@@ -171,13 +171,11 @@ public sealed class PdfDocument : IDisposable
         var writer = new PdfObjectWriter(stream);
         writer.WriteHeader();
 
-        // ---- PDF/A conformance: collect document ID up front ----
+        // ---- Document ID: always write /ID in trailer for compatibility ----
+        byte[] documentId = RandomNumberGenerator.GetBytes(16);
+
+        // ---- PDF/A conformance: ----
         bool pdfA = Options.ConformanceLevel == PdfConformanceLevel.PdfA1b;
-        byte[]? documentId = null;
-        if (pdfA)
-        {
-            documentId = RandomNumberGenerator.GetBytes(16);
-        }
 
         // ---- Pass 1: collect all fonts, glyphs, and images used across all pages ----
         var usedFonts = CollectUsedFonts();
@@ -245,7 +243,7 @@ public sealed class PdfDocument : IDisposable
         }
 
         // XMP metadata object (PDF/A)
-        int metadataObj = pdfA ? writer.NextObjectNumber() : 0;
+        int metadataObj = writer.NextObjectNumber();
 
         // Output intent object (PDF/A)
         int outputIntentObj = pdfA ? writer.NextObjectNumber() : 0;
@@ -290,18 +288,15 @@ public sealed class PdfDocument : IDisposable
             writer.EndObject();
         }
 
-        // XMP metadata stream (PDF/A)
-        if (pdfA)
-        {
-            writer.BeginObject(metadataObj);
-            writer.WriteDictionaryStart();
-            writer.WriteKey("/Type", "/Metadata");
-            writer.WriteKey("/Subtype", "/XML");
-            writer.WriteKey("/Length", XmpMetadata().Length.ToString());
-            writer.WriteDictionaryEnd();
-            writer.WriteStream(XmpMetadata());
-            writer.EndObject();
-        }
+        // XMP metadata stream
+        writer.BeginObject(metadataObj);
+        writer.WriteDictionaryStart();
+        writer.WriteKey("/Type", "/Metadata");
+        writer.WriteKey("/Subtype", "/XML");
+        writer.WriteKey("/Length", XmpMetadata().Length.ToString());
+        writer.WriteDictionaryEnd();
+        writer.WriteStream(XmpMetadata());
+        writer.EndObject();
 
         // Output intent (PDF/A)
         if (pdfA)
@@ -699,9 +694,9 @@ public sealed class PdfDocument : IDisposable
         writer.WriteDictionaryStart();
         writer.WriteKey("/Type", "/Catalog");
         writer.WriteKey("/Pages", $"{pagesObj} 0 R");
+        writer.WriteKey("/Metadata", $"{metadataObj} 0 R");
         if (pdfA)
         {
-            writer.WriteKey("/Metadata", $"{metadataObj} 0 R");
             writer.WriteRaw($" /OutputIntents [{outputIntentObj} 0 R]");
             writer.WriteKey("/Lang", "(" + PdfStringEncoder.Encode(Options.Language ?? "en-US") + ")");
             writer.WriteKey("/Marked", "true");
