@@ -335,8 +335,7 @@ public sealed class PdfDocument : IDisposable
 
             if (_fonts.Embedded.TryGetValue(font, out var embedded))
             {
-                var charsForFont = usedGlyphs.TryGetValue(font, out var chars) ? chars : new HashSet<char>();
-                var subset = embedded.CreateSubset($"subset{fontObj}", charsForFont);
+                var subset = embedded; // Embed full font (not subset) for maximum compatibility
                 subsetFonts[font] = subset;
 
                 // Font file stream
@@ -385,7 +384,7 @@ public sealed class PdfDocument : IDisposable
                 writer.WriteKey("/FirstChar", "0");
                 writer.WriteKey("/LastChar", "255");
                 writer.WriteKey("/Encoding", "/WinAnsiEncoding");
-                var widths = BuildWidths(subset, charsForFont);
+                var widths = BuildWidths(subset, usedGlyphs.TryGetValue(font, out var chars) ? chars : new HashSet<char>());
                 writer.WriteKey("/Widths", $"[{string.Join(" ", widths.Select(w => w.ToString()))}]");
                 writer.WriteKey("/FontDescriptor", $"{fontDescObj} 0 R");
                 writer.WriteKey("/ToUnicode", $"{toUnicodeObj} 0 R");
@@ -860,9 +859,7 @@ public sealed class PdfDocument : IDisposable
 
         foreach (var c in chars)
         {
-            if (!subset.GlyphMap.TryGetValue(c, out var glyphId)) continue;
-
-            var advanceWidth = subset.GetAdvanceWidth(c);
+            var advanceWidth = subset.GetAdvanceWidthByCharCode(c);
             var unitsPerEm = subset.UnitsPerEm;
             var width = advanceWidth > 0 && unitsPerEm > 0
                 ? (int)Math.Round(advanceWidth * 1000.0 / unitsPerEm)

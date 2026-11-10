@@ -57,7 +57,32 @@ public sealed class PdfEmbeddedFont : IDisposable
     /// </summary>
     public short GetAdvanceWidth(char c)
     {
-        return _advanceWidths.TryGetValue(c, out var w) ? w : (short)0;
+        return GetAdvanceWidthByCharCode(c);
+    }
+
+    /// <summary>
+    /// Returns the advance width of a character by character code in font units, or 0 if unknown.
+    /// Works for both subset fonts (GlyphMap) and full fonts (reader.Cmap).
+    /// </summary>
+    public short GetAdvanceWidthByCharCode(char c)
+    {
+        // Subset font: use GlyphMap to map char → glyph ID → advance width
+        if (GlyphMap.TryGetValue(c, out var glyphId))
+        {
+            if (_reader?.Hmtx.TryGetValue(glyphId, out var metrics) == true)
+                return metrics.advanceWidth;
+            return 0;
+        }
+
+        // Full font: use reader.Cmap to map char → glyph ID → advance width
+        if (_reader?.Cmap.TryGetValue(c, out var glyphId2) == true)
+        {
+            if (_reader.Hmtx.TryGetValue(glyphId2, out var metrics2) == true)
+                return metrics2.advanceWidth;
+            return 0;
+        }
+
+        return 0;
     }
 
     /// <summary>
