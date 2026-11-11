@@ -55,7 +55,8 @@ public class FontSubsetTests
         await Assert.That(content).Contains("/BaseFont");
         var length1 = Regex.Match(content, @"/Length1\s+(\d+)");
         await Assert.That(length1.Success).IsTrue().Because("TrueType font stream should declare /Length1.");
-        await Assert.That(long.Parse(length1.Groups[1].Value)).IsEqualTo(fontStream.Length);
+        await Assert.That(long.Parse(length1.Groups[1].Value)).IsLessThan(fontStream.Length);
+        await Assert.That(Regex.IsMatch(content, @"/BaseFont\s+/[A-Z]{6}\+")).IsTrue();
     }
 
     [Test, TestFontFact]
@@ -226,6 +227,9 @@ public class FontSubsetTests
         await Assert.That(ReadUInt16BigEndian(cmapTable, cmapSubtableOffset)).IsEqualTo(4);
         int segmentCount = ReadUInt16BigEndian(cmapTable, cmapSubtableOffset + 6) / 2;
         await Assert.That(ReadUInt16BigEndian(cmapTable, cmapSubtableOffset + 2)).IsEqualTo(16 + 8 * segmentCount);
+        var postTable = ReadTable(subset.SubsetData, "post");
+        await Assert.That(ReadUInt32BigEndian(postTable, 0)).IsEqualTo(0x00030000u);
+        await Assert.That(postTable.Length).IsEqualTo(32);
         await AssertValidFontChecksums(subset.SubsetData);
     }
 

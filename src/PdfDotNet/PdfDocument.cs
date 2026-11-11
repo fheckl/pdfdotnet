@@ -159,6 +159,23 @@ public sealed class PdfDocument : IDisposable
 
     private static char HexChar(int nibble) => nibble < 10 ? (char)('0' + nibble) : (char)('A' + nibble - 10);
 
+    private static string CreateSubsetName(string postScriptName, ISet<string> usedNames)
+    {
+        const string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        while (true)
+        {
+            var randomBytes = RandomNumberGenerator.GetBytes(6);
+            var tag = new char[6];
+            for (int i = 0; i < tag.Length; i++)
+            {
+                tag[i] = letters[randomBytes[i] % letters.Length];
+            }
+
+            var subsetName = $"{new string(tag)}+{postScriptName}";
+            if (usedNames.Add(subsetName)) return subsetName;
+        }
+    }
+
     /// <summary>
     /// Core PDF writing. Writes the complete document (objects, xref, trailer, startxref)
     /// to <paramref name="stream"/>. When <paramref name="signatureOptions"/> is provided,
@@ -181,6 +198,23 @@ public sealed class PdfDocument : IDisposable
         var usedFonts = CollectUsedFonts();
         var usedGlyphs = CollectUsedGlyphs(usedFonts);
         var usedImages = CollectUsedImages();
+        var subsetFonts = new Dictionary<PdfFont, PdfEmbeddedFont>();
+        var subsetNames = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var font in usedFonts)
+        {
+            if (!_fonts.Embedded.TryGetValue(font, out var embedded))
+            {
+                continue;
+            }
+
+            var subsetCharacters = usedGlyphs[font]
+                .Select(c => c <= byte.MaxValue ? c : '?')
+                .ToHashSet();
+            var subsetName = CreateSubsetName(embedded.PostScriptName, subsetNames);
+            var subset = embedded.TryCreateSubset(subsetName, subsetCharacters);
+            subsetFonts[font] = subset ?? embedded;
+        }
 
         // PDF/A-1b requires all fonts to be embedded.
         if (pdfA)
@@ -323,15 +357,13 @@ public sealed class PdfDocument : IDisposable
         }
 
         // Font objects + embedded font file streams
-        var subsetFonts = new Dictionary<PdfFont, PdfEmbeddedFont>();
         foreach (var font in usedFonts)
         {
             int fontObj = fontObjNumbers[font];
 
             if (_fonts.Embedded.TryGetValue(font, out var embedded))
             {
-                var subset = embedded; // Embed full font (not subset) for maximum compatibility
-                subsetFonts[font] = subset;
+                var subset = subsetFonts[font];
 
                 // Font file stream
                 int fontFileObj = fontFileObjNumbers[font];

@@ -33,7 +33,7 @@ internal static class TtfSubsetBuilder
                 if (oldToNew.ContainsKey(component.glyphId)) continue;
                 if (oldToNew.Count >= 256)
                 {
-                    throw new InvalidOperationException("A font subset cannot contain more than 256 glyphs including .notdef.");
+                    throw new FontSubsetLimitException("A font subset cannot contain more than 256 glyphs including .notdef.");
                 }
                 oldToNew[component.glyphId] = (byte)oldToNew.Count;
                 pendingGlyphs.Enqueue(component.glyphId);
@@ -107,9 +107,14 @@ internal static class TtfSubsetBuilder
         var name = GetTable(reader, "name");
         if (name != null) tables["name"] = name;
 
-        // post: copy original if present
+        // post: remove glyph names tied to the original glyph order.
         var post = GetTable(reader, "post");
-        if (post != null) tables["post"] = post;
+        if (post != null)
+        {
+            if (post.Length < 32) throw new InvalidDataException("TTF 'post' table is truncated.");
+            WriteUInt32BE(post, 0, 0x00030000);
+            tables["post"] = post.AsSpan(0, 32).ToArray();
+        }
 
         // ---- 6. Assemble final TTF ----
         return AssembleTtf(tables);
@@ -415,4 +420,11 @@ internal static class TtfSubsetBuilder
 
     private static ushort ReadUInt16BE(byte[] data, int offset) =>
         (ushort)((data[offset] << 8) | data[offset + 1]);
+}
+
+internal sealed class FontSubsetLimitException : InvalidOperationException
+{
+    public FontSubsetLimitException(string message) : base(message)
+    {
+    }
 }

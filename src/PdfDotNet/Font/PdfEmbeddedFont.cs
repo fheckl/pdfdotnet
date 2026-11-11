@@ -43,7 +43,7 @@ public sealed class PdfEmbeddedFont : IDisposable
     /// <summary>PostScript name (used for /BaseFont).</summary>
     public string PostScriptName { get; }
 
-    /// <summary>Subsetted TTF data.</summary>
+    /// <summary>TrueType data to embed, either full or subsetted.</summary>
     public byte[] SubsetData { get; }
 
     /// <summary>
@@ -91,8 +91,8 @@ public sealed class PdfEmbeddedFont : IDisposable
         // Subset font: use GlyphMap to map char → glyph ID → advance width
         if (GlyphMap.TryGetValue(c, out var glyphId))
         {
-            if (_reader?.Hmtx.TryGetValue(glyphId, out var metrics) == true)
-                return metrics.advanceWidth;
+            if (_advanceWidths.TryGetValue(c, out var advanceWidth))
+                return advanceWidth;
             return 0;
         }
 
@@ -160,9 +160,6 @@ public sealed class PdfEmbeddedFont : IDisposable
 
     /// <summary>
     /// Creates an embedded font from a TTF stream.
-    /// The full font is embedded without subsetting so that the PDF's cmap and post table
-    /// remain consistent with the original font file. This ensures maximum compatibility
-    /// with PDF viewers.
     /// </summary>
     public static PdfEmbeddedFont Create(Stream ttfStream, string baseName)
     {
@@ -172,7 +169,6 @@ public sealed class PdfEmbeddedFont : IDisposable
         var reader = new TtfFontReader(ttfStream);
         string postScriptName = reader.ReadPostScriptName() ?? baseName.Replace(" ", string.Empty);
 
-        // Embed the full font without subsetting.
         return new PdfEmbeddedFont(postScriptName, postScriptName, reader.FontData,
             new Dictionary<char, byte>(), reader.WinAscent, reader.WinDescent, reader.UnitsPerEm,
             new Dictionary<char, short>(), reader, reader.FontData,
@@ -186,6 +182,8 @@ public sealed class PdfEmbeddedFont : IDisposable
     public PdfEmbeddedFont CreateSubset(string subsetName, IReadOnlySet<char> characters)
     {
         if (_reader == null) throw new InvalidOperationException("Font reader is not available.");
+        if (string.IsNullOrEmpty(subsetName)) throw new ArgumentNullException(nameof(subsetName));
+        if (characters == null) throw new ArgumentNullException(nameof(characters));
 
         var glyphMap = new Dictionary<char, byte>();
         var advanceWidths = new Dictionary<char, short>();
@@ -205,7 +203,7 @@ public sealed class PdfEmbeddedFont : IDisposable
                 {
                     if (nextIndex == 0)
                     {
-                        throw new InvalidOperationException("A font subset cannot contain more than 255 distinct glyphs.");
+                        throw new FontSubsetLimitException("A font subset cannot contain more than 255 distinct glyphs.");
                     }
                     newGlyphId = nextIndex++;
                     oldToNew[glyphId] = newGlyphId;
@@ -222,10 +220,23 @@ public sealed class PdfEmbeddedFont : IDisposable
             ? Array.Empty<byte>()
             : TtfSubsetBuilder.Build(_reader, glyphMap);
 
-        return new PdfEmbeddedFont(subsetName, PostScriptName, subsetData,
+        return new PdfEmbeddedFont(subsetName, subsetName, subsetData,
             glyphMap, Ascent, Descent, UnitsPerEm, advanceWidths, null, _fontData,
             FontBBoxXMin, FontBBoxYMin, FontBBoxXMax, FontBBoxYMax,
             XHeight, CapHeight);
+    }
+
+    internal PdfEmbeddedFont? TryCreateSubset(string subsetName, IReadOnlySet<char> characters)
+    {
+        try
+        {
+            var subset = CreateSubset(subsetName, characters);
+            return subset.SubsetData.Length == 0 ? null : subset;
+        }
+        catch (FontSubsetLimitException)
+        {
+            return null;
+        }
     }
 
     public void Dispose()
