@@ -352,6 +352,8 @@ public sealed class PdfDocument : IDisposable
                 writer.WriteKey("/Descent", (-subset.Descent).ToString(CultureInfo.InvariantCulture));
                 writer.WriteKey("/CapHeight", subset.CapHeight.ToString(CultureInfo.InvariantCulture));
                 writer.WriteKey("/XHeight", subset.XHeight.ToString(CultureInfo.InvariantCulture));
+                // Use reasonable FontBBox values (font file head table may have invalid values)
+                writer.WriteKey("/FontBBox", "[-250 -300 1000 800]");
                 writer.WriteKey("/ItalicAngle", "0");
                 writer.WriteKey("/StemV", "0");
                 writer.WriteKey("/Flags", "32");
