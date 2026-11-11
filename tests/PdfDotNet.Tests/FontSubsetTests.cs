@@ -1,7 +1,8 @@
+using System.IO;
 using pdfdotnet;
 using pdfdotnet.Font;
 using System.Text.RegularExpressions;
-using Xunit;
+using System.Threading.Tasks;
 
 namespace PdfDotNet.Tests;
 
@@ -9,8 +10,8 @@ public class FontSubsetTests
 {
     private static readonly string TestFontPath = Path.Combine(AppContext.BaseDirectory, "TestFont.ttf");
 
-    [TestFontFact]
-    public void EmbeddedFont_CreateSubset_ProducesSmallerTtf()
+    [Test, TestFontFact]
+    public async Task EmbeddedFont_CreateSubset_ProducesSmallerTtf()
     {
         // Arrange
         using var fontStream = File.OpenRead(TestFontPath);
@@ -23,17 +24,17 @@ public class FontSubsetTests
         var subset = embedded.CreateSubset("TestSubset", new HashSet<char> { 'H', 'e', 'l', 'o' });
 
         // Assert
-        Assert.True(subset.SubsetData.Length > 0);
-        Assert.True(subset.SubsetData.Length <= originalSize, $"Subset ({subset.SubsetData.Length}) should not exceed original ({originalSize})");
-        Assert.True(subset.GlyphMap.Count <= 5);
-        Assert.Contains('H', subset.GlyphMap.Keys);
-        Assert.Contains('e', subset.GlyphMap.Keys);
-        Assert.Contains('l', subset.GlyphMap.Keys);
-        Assert.Contains('o', subset.GlyphMap.Keys);
+        await Assert.That(subset.SubsetData.Length > 0).IsTrue();
+        await Assert.That(subset.SubsetData.Length <= originalSize).IsTrue().Because($"Subset ({subset.SubsetData.Length}) should not exceed original ({originalSize})");
+        await Assert.That(subset.GlyphMap.Count <= 5).IsTrue();
+        await Assert.That(subset.GlyphMap.Keys).Contains('H');
+        await Assert.That(subset.GlyphMap.Keys).Contains('e');
+        await Assert.That(subset.GlyphMap.Keys).Contains('l');
+        await Assert.That(subset.GlyphMap.Keys).Contains('o');
     }
 
-    [TestFontFact]
-    public void PdfDocument_WithEmbeddedSubsetFont_WritesFontFileStream()
+    [Test, TestFontFact]
+    public async Task PdfDocument_WithEmbeddedSubsetFont_WritesFontFileStream()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -49,16 +50,16 @@ public class FontSubsetTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("/Subtype /TrueType", content);
-        Assert.Contains("/FontFile", content); // /FontFile stream
-        Assert.Contains("/BaseFont", content);
+        await Assert.That(content).Contains("/Subtype /TrueType");
+        await Assert.That(content).Contains("/FontFile"); // /FontFile stream
+        await Assert.That(content).Contains("/BaseFont");
         var length1 = Regex.Match(content, @"/Length1\s+(\d+)");
-        Assert.True(length1.Success, "TrueType font stream should declare /Length1.");
-        Assert.Equal(fontStream.Length, long.Parse(length1.Groups[1].Value));
+        await Assert.That(length1.Success).IsTrue().Because("TrueType font stream should declare /Length1.");
+        await Assert.That(long.Parse(length1.Groups[1].Value)).IsEqualTo(fontStream.Length);
     }
 
-    [TestFontFact]
-    public void AddEmbeddedFromFile_LoadsFont()
+    [Test, TestFontFact]
+    public async Task AddEmbeddedFromFile_LoadsFont()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -67,19 +68,19 @@ public class FontSubsetTests
         var font = doc.Fonts.AddEmbeddedFromFile(TestFontPath, "FromFile");
 
         // Assert
-        Assert.NotNull(font);
-        Assert.False(string.IsNullOrEmpty(font.BaseFont));
+        await Assert.That(font).IsNotNull();
+        await Assert.That(string.IsNullOrEmpty(font.BaseFont)).IsFalse();
     }
 
-    [Fact]
+    [Test]
     public void AddEmbeddedFromFile_MissingFile_Throws()
     {
         var doc = new PdfDocument();
         Assert.Throws<FileNotFoundException>(() => doc.Fonts.AddEmbeddedFromFile("nonexistent.ttf", "X"));
     }
 
-    [Fact]
-    public void DrawText_WithColor_WritesColorOperator()
+    [Test]
+    public async Task DrawText_WithColor_WritesColorOperator()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -92,11 +93,11 @@ public class FontSubsetTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("1 0 0 rg", content);
+        await Assert.That(content).Contains("1 0 0 rg");
     }
 
-    [Fact]
-    public void DrawWrappedText_WrapsAtMaxWidth()
+    [Test]
+    public async Task DrawWrappedText_WrapsAtMaxWidth()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -111,12 +112,12 @@ public class FontSubsetTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Should contain multiple text operations (at least 2 lines)
-        Assert.True(content.Contains("Tj") || content.Contains("TJ"), "Should contain text operations");
-        Assert.True(endY < 800, "Y should move down after wrapping");
+        await Assert.That(content.Contains("Tj") || content.Contains("TJ")).IsTrue().Because("Should contain text operations");
+        await Assert.That(endY < 800).IsTrue().Because("Y should move down after wrapping");
     }
 
-    [TestFontFact]
-    public void TtfFontReader_StaysAliveAfterConstruction()
+    [Test, TestFontFact]
+    public async Task TtfFontReader_StaysAliveAfterConstruction()
     {
         // Arrange
         using var fontStream = File.OpenRead(TestFontPath);
@@ -128,11 +129,11 @@ public class FontSubsetTests
         var longOffsets = GetLongOffsetsViaReflection(reader);
 
         // Assert
-        Assert.NotNull(offset0);
+        await Assert.That(offset0).IsNotNull();
     }
 
-    [TestFontFact]
-    public void TtfFontReader_EmbeddedFontSubset_DoesNotThrowOnUsedGlyphs()
+    [Test, TestFontFact]
+    public async Task TtfFontReader_EmbeddedFontSubset_DoesNotThrowOnUsedGlyphs()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -145,11 +146,11 @@ public class FontSubsetTests
         // Act + Assert: Save embeds the font and writes a non-empty PDF.
         using var ms = new MemoryStream();
         doc.Save(ms);
-        Assert.True(ms.Length > 0);
+        await Assert.That(ms.Length > 0).IsTrue();
     }
 
-    [TestFontFact]
-    public void EmbeddedFont_ToUnicodeCMapSplitsMappingsIntoBlocksOfAtMost100()
+    [Test, TestFontFact]
+    public async Task EmbeddedFont_ToUnicodeCMapSplitsMappingsIntoBlocksOfAtMost100()
     {
         using var fontStream = File.OpenRead(TestFontPath);
         using var font = PdfEmbeddedFont.Create(fontStream, "TestFont");
@@ -160,20 +161,23 @@ public class FontSubsetTests
             .Select(line => int.Parse(line.Split(' ')[0]))
             .ToArray();
 
-        Assert.NotEmpty(blockSizes);
-        Assert.All(blockSizes, count => Assert.InRange(count, 1, 100));
-        Assert.Equal(256, blockSizes.Sum());
+        await Assert.That(blockSizes).IsNotEmpty();
+        foreach (var count in blockSizes)
+        {
+            await Assert.That(count).IsBetween(1, 100);
+        }
+        await Assert.That(blockSizes.Sum()).IsEqualTo(256);
     }
 
-    [TestFontFact]
-    public void PdfDocument_EmbeddedFontWidthsMatchWinAnsiCodesAndFallback()
+    [Test, TestFontFact]
+    public async Task PdfDocument_EmbeddedFontWidthsMatchWinAnsiCodesAndFallback()
     {
         var doc = new PdfDocument();
         using var fontStream = File.OpenRead(TestFontPath);
         var font = doc.Fonts.AddEmbedded(fontStream, "TestFont");
         using var readerStream = File.OpenRead(TestFontPath);
         using var reader = new TtfFontReader(readerStream);
-        Assert.Equal(2048, reader.UnitsPerEm);
+        await Assert.That(reader.UnitsPerEm).IsEqualTo(2048);
         var page = doc.AddPage(PdfPaperSize.A4);
         page.DrawText("A\u20ac", 50, 800, font, 12);
 
@@ -183,47 +187,50 @@ public class FontSubsetTests
         var match = Regex.Match(content,
             @"/FirstChar\s+(\d+)\s+/LastChar\s+(\d+)\s+/Encoding\s+/WinAnsiEncoding\s+/Widths\s+\[([^\]]*)\]");
 
-        Assert.True(match.Success, "Embedded font dictionary should contain its character range and widths.");
-        Assert.Equal(0, int.Parse(match.Groups[1].Value));
-        Assert.Equal(255, int.Parse(match.Groups[2].Value));
+        await Assert.That(match.Success).IsTrue().Because("Embedded font dictionary should contain its character range and widths.");
+        await Assert.That(int.Parse(match.Groups[1].Value)).IsEqualTo(0);
+        await Assert.That(int.Parse(match.Groups[2].Value)).IsEqualTo(255);
 
         var widths = match.Groups[3].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Select(int.Parse)
             .ToArray();
-        Assert.Equal(256, widths.Length);
-        Assert.Equal(ToPdfWidth(reader.Hmtx[reader.Cmap['A']].advanceWidth, reader.UnitsPerEm), widths['A']);
-        Assert.Equal(ToPdfWidth(reader.Hmtx[reader.Cmap['?']].advanceWidth, reader.UnitsPerEm), widths['?']);
+        await Assert.That(widths.Length).IsEqualTo(256);
+        await Assert.That(widths['A']).IsEqualTo(ToPdfWidth(reader.Hmtx[reader.Cmap['A']].advanceWidth, reader.UnitsPerEm));
+        await Assert.That(widths['?']).IsEqualTo(ToPdfWidth(reader.Hmtx[reader.Cmap['?']].advanceWidth, reader.UnitsPerEm));
     }
 
     private static int ToPdfWidth(short advanceWidth, ushort unitsPerEm) =>
         (int)Math.Round(advanceWidth * 1000.0 / unitsPerEm);
 
-    [TestFontFact]
-    public void EmbeddedFont_CreateSubset_RemapsCompositeGlyphsAndWritesValidChecksums()
+    [Test, TestFontFact]
+    public async Task EmbeddedFont_CreateSubset_RemapsCompositeGlyphsAndWritesValidChecksums()
     {
         using var fontStream = File.OpenRead(TestFontPath);
         using var font = PdfEmbeddedFont.Create(fontStream, "TestFont");
         var subset = font.CreateSubset("TestSubset", new HashSet<char> { 'A', 'é' });
         using var subsetReader = new TtfFontReader(new MemoryStream(subset.SubsetData));
 
-        Assert.Equal(subset.GlyphMap['é'], subsetReader.Cmap['é']);
+        await Assert.That(subsetReader.Cmap['é']).IsEqualTo(subset.GlyphMap['é']);
         var compositeGlyph = subsetReader.GetGlyphRawData(subset.GlyphMap['é']);
-        Assert.True(compositeGlyph.Length >= 10);
-        Assert.True(ReadInt16BigEndian(compositeGlyph, 0) < 0);
+        await Assert.That(compositeGlyph.Length >= 10).IsTrue();
+        await Assert.That(ReadInt16BigEndian(compositeGlyph, 0) < 0).IsTrue();
         var componentGlyphs = ReadCompositeGlyphIds(compositeGlyph);
-        Assert.NotEmpty(componentGlyphs);
-        Assert.All(componentGlyphs, glyphId => Assert.InRange(glyphId, (ushort)0, (ushort)(subsetReader.NumGlyphs - 1)));
+        await Assert.That(componentGlyphs).IsNotEmpty();
+        foreach (var glyphId in componentGlyphs)
+        {
+            await Assert.That(glyphId).IsBetween((ushort)0, (ushort)(subsetReader.NumGlyphs - 1));
+        }
 
         var cmapTable = ReadTable(subset.SubsetData, "cmap");
         var cmapSubtableOffset = (int)ReadUInt32BigEndian(cmapTable, 8);
-        Assert.Equal(4, ReadUInt16BigEndian(cmapTable, cmapSubtableOffset));
+        await Assert.That(ReadUInt16BigEndian(cmapTable, cmapSubtableOffset)).IsEqualTo(4);
         int segmentCount = ReadUInt16BigEndian(cmapTable, cmapSubtableOffset + 6) / 2;
-        Assert.Equal(16 + 8 * segmentCount, ReadUInt16BigEndian(cmapTable, cmapSubtableOffset + 2));
-        AssertValidFontChecksums(subset.SubsetData);
+        await Assert.That(ReadUInt16BigEndian(cmapTable, cmapSubtableOffset + 2)).IsEqualTo(16 + 8 * segmentCount);
+        await AssertValidFontChecksums(subset.SubsetData);
     }
 
-    [TestFontFact]
-    public void EmbeddedFont_CreateSubset_RejectsCharactersOutsideByteRange()
+    [Test, TestFontFact]
+    public async Task EmbeddedFont_CreateSubset_RejectsCharactersOutsideByteRange()
     {
         using var fontStream = File.OpenRead(TestFontPath);
         using var subsetSource = PdfEmbeddedFont.Create(fontStream, "TestFont");
@@ -266,9 +273,9 @@ public class FontSubsetTests
         throw new InvalidDataException($"Font is missing '{tag}' table.");
     }
 
-    private static void AssertValidFontChecksums(byte[] fontData)
+    private static async Task AssertValidFontChecksums(byte[] fontData)
     {
-        Assert.Equal(0xB1B0AFBAu, ComputeChecksum(fontData));
+        await Assert.That(ComputeChecksum(fontData)).IsEqualTo(0xB1B0AFBAu);
         int tableCount = ReadUInt16BigEndian(fontData, 4);
         for (int i = 0; i < tableCount; i++)
         {
@@ -279,7 +286,7 @@ public class FontSubsetTests
             byte[] table = fontData.AsSpan(tableOffset, tableLength).ToArray();
             string tag = System.Text.Encoding.ASCII.GetString(fontData, entryOffset, 4);
             if (tag == "head") Array.Clear(table, 8, 4);
-            Assert.Equal(expectedChecksum, ComputeChecksum(table));
+            await Assert.That(ComputeChecksum(table)).IsEqualTo(expectedChecksum);
         }
     }
 
@@ -318,13 +325,12 @@ public class FontSubsetTests
     }
 }
 
-public sealed class TestFontFactAttribute : FactAttribute
+public sealed class TestFontFactAttribute : SkipAttribute
 {
-    public TestFontFactAttribute()
+    public TestFontFactAttribute() : base("Optional test font testassets/TestFont.ttf is not present.")
     {
-        if (!File.Exists(Path.Combine(AppContext.BaseDirectory, "TestFont.ttf")))
-        {
-            Skip = "Optional test font testassets/TestFont.ttf is not present.";
-        }
     }
+
+    public override Task<bool> ShouldSkip(TestRegisteredContext testContext) =>
+        Task.FromResult(!File.Exists(Path.Combine(AppContext.BaseDirectory, "TestFont.ttf")));
 }

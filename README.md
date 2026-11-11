@@ -128,7 +128,7 @@ src/PdfDotNet/          Implementation library (.NET 10)
   Font/TtfSubsetBuilder.cs Real glyph subset TTF builder
   PdfObjectWriter.cs    PDF indirect objects, XRef, Trailer, Startxref
   PdfImage.cs           Image XObject (PNG/JPEG detection)
-tests/PdfDotNet.Tests/  xunit.v3 tests (all green)
+tests/PdfDotNet.Tests/  TUnit tests on Microsoft.Testing.Platform
 ```
 
 ## License

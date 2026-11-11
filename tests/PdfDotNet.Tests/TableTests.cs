@@ -1,12 +1,14 @@
+using System.IO;
 using pdfdotnet;
-using Xunit;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace PdfDotNet.Tests;
 
 public class TableTests
 {
-    [Fact]
-    public void DrawTable_WithHeader_WritesRectAndText()
+    [Test]
+    public async Task DrawTable_WithHeader_WritesRectAndText()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -26,18 +28,18 @@ public class TableTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert: borders drawn (rect operator), text present
-        Assert.Contains("re", content);
-        Assert.Contains("Name", content);
-        Assert.Contains("Wert", content);
-        Assert.Contains("Alice", content);
-        Assert.Contains("Bob", content);
-        Assert.Contains("100", content);
-        Assert.Contains("200", content);
-        Assert.Contains("S\n", content); // stroke
+        await Assert.That(content).Contains("re");
+        await Assert.That(content).Contains("Name");
+        await Assert.That(content).Contains("Wert");
+        await Assert.That(content).Contains("Alice");
+        await Assert.That(content).Contains("Bob");
+        await Assert.That(content).Contains("100");
+        await Assert.That(content).Contains("200");
+        await Assert.That(content).Contains("S\n"); // stroke
     }
 
-    [Fact]
-    public void DrawTable_WithoutHeader_SkipsHeaderRow()
+    [Test]
+    public async Task DrawTable_WithoutHeader_SkipsHeaderRow()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -55,22 +57,17 @@ public class TableTests
         doc.Save(ms);
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
-        Assert.Contains("1", content);
-        Assert.Contains("2", content);
-        Assert.DoesNotContain("Header", content);
+        await Assert.That(content).Contains("1");
+        await Assert.That(content).Contains("2");
+        await Assert.That(content).DoesNotContain("Header");
     }
 
-    [Fact]
-    public void DrawTable_WithEmbeddedFont_WritesTrueTypeFont()
+    [Test, TestFontFact]
+    public async Task DrawTable_WithEmbeddedFont_WritesTrueTypeFont()
     {
-        if (!File.Exists("testassets/TestFont.ttf"))
-        {
-            return;
-        }
-
         // Arrange
         var doc = new PdfDocument();
-        using var fs = File.OpenRead("testassets/TestFont.ttf");
+        using var fs = File.OpenRead(Path.Combine(AppContext.BaseDirectory, "TestFont.ttf"));
         var font = doc.Fonts.AddEmbedded(fs, "TableFont");
 
         var page = doc.AddPage(PdfPaperSize.A4);
@@ -85,12 +82,46 @@ public class TableTests
         doc.Save(ms);
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
-        Assert.Contains("/Subtype /TrueType", content);
-        Assert.Contains("/FontFile", content);
-        Assert.Contains("Alice", content);
+        await Assert.That(content).Contains("/Subtype /TrueType");
+        await Assert.That(content).Contains("/FontFile");
+        await Assert.That(content).Contains("/F1 10 Tf");
+        await Assert.That(Regex.IsMatch(content, @"/F1\s+\d+\s+0 R")).IsTrue();
+        var widths = Regex.Match(content, @"/Widths\s+\[([^\]]+)\]");
+        await Assert.That(widths.Success).IsTrue();
+        var characterWidths = widths.Groups[1].Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(int.Parse)
+            .ToArray();
+        await Assert.That(characterWidths['A']).IsGreaterThan(0);
+        await Assert.That(content).Contains("Alice");
     }
 
-    [Fact]
+    [Test, TestFontFact]
+    public async Task DrawTable_WithEmbeddedFont_RegistersFontOnContinuationPages()
+    {
+        var doc = new PdfDocument();
+        using var fontStream = File.OpenRead(Path.Combine(AppContext.BaseDirectory, "TestFont.ttf"));
+        var font = doc.Fonts.AddEmbedded(fontStream, "TableFont");
+        var page = doc.AddPage(PdfPaperSize.A4);
+
+        var table = new PdfTable { Font = font, WrapText = false };
+        table.AddColumn("Name", 100);
+        for (int i = 0; i < 40; i++)
+        {
+            table.AddRow($"Row {i}");
+        }
+
+        page.DrawTable(table, 50, 100);
+
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
+
+        var resourceReferences = Regex.Matches(content, @"/F1\s+\d+\s+0 R");
+        await Assert.That(resourceReferences.Count).IsGreaterThan(1);
+        await Assert.That(content).Contains("/FontFile");
+    }
+
+    [Test]
     public void DrawTable_NullTable_Throws()
     {
         var doc = new PdfDocument();
@@ -98,8 +129,8 @@ public class TableTests
         Assert.Throws<ArgumentNullException>(() => page.DrawTable(null!, 50, 800));
     }
 
-    [Fact]
-    public void DrawTable_EmptyColumns_DoesNothing()
+    [Test]
+    public async Task DrawTable_EmptyColumns_DoesNothing()
     {
         var doc = new PdfDocument();
         var page = doc.AddPage(PdfPaperSize.A4);
@@ -112,11 +143,11 @@ public class TableTests
 
         using var ms = new MemoryStream();
         doc.Save(ms); // should not throw
-        Assert.True(ms.Length > 0);
+        await Assert.That(ms.Length > 0).IsTrue();
     }
 
-    [Fact]
-    public void DrawTable_WrapText_SplitsIntoMultipleLines()
+    [Test]
+    public async Task DrawTable_WrapText_SplitsIntoMultipleLines()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -135,15 +166,15 @@ public class TableTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("This", content);
-        Assert.Contains("long", content);
-        Assert.Contains("lines", content);
-        Assert.Contains("Short", content);
-        Assert.Contains("Tj", content); // text operations present
+        await Assert.That(content).Contains("This");
+        await Assert.That(content).Contains("long");
+        await Assert.That(content).Contains("lines");
+        await Assert.That(content).Contains("Short");
+        await Assert.That(content).Contains("Tj"); // text operations present
     }
 
-    [Fact]
-    public void DrawTable_TextAlignment_Right()
+    [Test]
+    public async Task DrawTable_TextAlignment_Right()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -160,12 +191,12 @@ public class TableTests
         doc.Save(ms);
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
-        Assert.Contains("Alice", content);
-        Assert.Contains("re", content); // borders
+        await Assert.That(content).Contains("Alice");
+        await Assert.That(content).Contains("re"); // borders
     }
 
-    [Fact]
-    public void DrawTable_ContinuesOnNewPage_WhenNotFitting()
+    [Test]
+    public async Task DrawTable_ContinuesOnNewPage_WhenNotFitting()
     {
         // Arrange: start near bottom so table must continue on next page
         var doc = new PdfDocument();
@@ -188,14 +219,14 @@ public class TableTests
         var content = System.Text.Encoding.UTF8.GetString(bytes);
 
         // Assert
-        Assert.StartsWith("%PDF-1.7", content);
-        Assert.EndsWith("%%EOF", content.TrimEnd('\n', '\r'));
+        await Assert.That(content).StartsWith("%PDF-1.7");
+        await Assert.That(content.TrimEnd('\n', '\r')).EndsWith("%%EOF");
         // Table should span multiple pages (started near bottom with 40 rows)
         var countMatch = System.Text.RegularExpressions.Regex.Match(content, @"/Count (\d+)");
-        Assert.True(countMatch.Success, "Should have a Pages count");
+        await Assert.That(countMatch.Success).IsTrue().Because("Should have a Pages count");
         int pageCount = int.Parse(countMatch.Groups[1].Value);
-        Assert.True(pageCount > 1, $"Expected multiple pages, got {pageCount}");
-        Assert.Contains("Row 0", content);
-        Assert.Contains("Row 39", content);
+        await Assert.That(pageCount > 1).IsTrue().Because($"Expected multiple pages, got {pageCount}");
+        await Assert.That(content).Contains("Row 0");
+        await Assert.That(content).Contains("Row 39");
     }
 }

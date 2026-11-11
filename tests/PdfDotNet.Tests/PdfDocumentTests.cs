@@ -1,12 +1,13 @@
+using System.IO;
 using pdfdotnet;
-using Xunit;
+using System.Threading.Tasks;
 
 namespace PdfDotNet.Tests;
 
 public class PdfDocumentTests
 {
-    [Fact]
-    public void Save_ToMemoryStream_ProducesValidPdfStructure()
+    [Test]
+    public async Task Save_ToMemoryStream_ProducesValidPdfStructure()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -19,19 +20,19 @@ public class PdfDocumentTests
         var bytes = ms.ToArray();
 
         // Assert
-        Assert.True(bytes.Length > 0);
+        await Assert.That(bytes.Length > 0).IsTrue();
         var content = System.Text.Encoding.UTF8.GetString(bytes);
-        Assert.StartsWith("%PDF-1.7", content);
-        Assert.EndsWith("%%EOF", content.TrimEnd('\n', '\r'));
-        Assert.Contains("Hallo Welt", content);
-        Assert.Contains("/Type /Catalog", content);
-        Assert.Contains("/Type /Page", content);
-        Assert.Contains("/Type /Font", content);
-        Assert.Contains("/BaseFont /Helvetica", content);
+        await Assert.That(content).StartsWith("%PDF-1.7");
+        await Assert.That(content.TrimEnd('\n', '\r')).EndsWith("%%EOF");
+        await Assert.That(content).Contains("Hallo Welt");
+        await Assert.That(content).Contains("/Type /Catalog");
+        await Assert.That(content).Contains("/Type /Page");
+        await Assert.That(content).Contains("/Type /Font");
+        await Assert.That(content).Contains("/BaseFont /Helvetica");
     }
 
-    [Fact]
-    public void Save_ToFilePath_OverwritesExistingFile()
+    [Test]
+    public async Task Save_ToFilePath_OverwritesExistingFile()
     {
         // Arrange
         var path = Path.Combine(Path.GetTempPath(), $"PdfDotNet_Test_{Guid.NewGuid():N}.pdf");
@@ -51,8 +52,8 @@ public class PdfDocumentTests
 
             // Assert
             var content = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(path));
-            Assert.Contains("Zweit", content);
-            Assert.DoesNotContain("Erst", content);
+            await Assert.That(content).Contains("Zweit");
+            await Assert.That(content).DoesNotContain("Erst");
         }
         finally
         {
@@ -60,31 +61,31 @@ public class PdfDocumentTests
         }
     }
 
-    [Fact]
-    public void CustomPaperSize_IsCustomFlagSet()
+    [Test]
+    public async Task CustomPaperSize_IsCustomFlagSet()
     {
         // Arrange & Act
         var custom = PdfPaperSize.Custom("MeinFormat", 300, 400);
 
         // Assert
-        Assert.True(custom.IsCustom);
-        Assert.Equal("MeinFormat", custom.Name);
-        Assert.Equal(300, custom.WidthPoints);
-        Assert.Equal(400, custom.HeightPoints);
+        await Assert.That(custom.IsCustom).IsTrue();
+        await Assert.That(custom.Name).IsEqualTo("MeinFormat");
+        await Assert.That(custom.WidthPoints).IsEqualTo(300);
+        await Assert.That(custom.HeightPoints).IsEqualTo(400);
     }
 
-    [Fact]
-    public void PredefinedSizes_HaveExpectedValues()
+    [Test]
+    public async Task PredefinedSizes_HaveExpectedValues()
     {
-        Assert.Equal(595.28, PdfPaperSize.A4.WidthPoints, 1);
-        Assert.Equal(841.89, PdfPaperSize.A4.HeightPoints, 1);
-        Assert.Equal(612, PdfPaperSize.Letter.WidthPoints);
-        Assert.Equal(792, PdfPaperSize.Letter.HeightPoints);
-        Assert.False(PdfPaperSize.A4.IsCustom);
+        await Assert.That(PdfPaperSize.A4.WidthPoints).IsCloseTo(595.28, 1);
+        await Assert.That(PdfPaperSize.A4.HeightPoints).IsCloseTo(841.89, 1);
+        await Assert.That(PdfPaperSize.Letter.WidthPoints).IsEqualTo(612);
+        await Assert.That(PdfPaperSize.Letter.HeightPoints).IsEqualTo(792);
+        await Assert.That(PdfPaperSize.A4.IsCustom).IsFalse();
     }
 
-    [Fact]
-    public void TopLeft_CoordinateSystem_FlipsY()
+    [Test]
+    public async Task TopLeft_CoordinateSystem_FlipsY()
     {
         // Arrange
         var doc = new PdfDocument
@@ -100,11 +101,11 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert: with TopLeft, y is mirrored: 841.89 - 50 = 791.89
-        Assert.Contains("791.89", content);
+        await Assert.That(content).Contains("791.89");
     }
 
-    [Fact]
-    public void MultiplePages_AreAllIncluded()
+    [Test]
+    public async Task MultiplePages_AreAllIncluded()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -118,13 +119,13 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("/Count 3", content);
-        Assert.Contains("3 0 R", content);
-        Assert.Contains("4 0 R", content);
-        Assert.Contains("5 0 R", content);
+        await Assert.That(content).Contains("/Count 3");
+        await Assert.That(content).Contains("3 0 R");
+        await Assert.That(content).Contains("4 0 R");
+        await Assert.That(content).Contains("5 0 R");
     }
 
-    [Fact]
+    [Test]
     public void DrawText_WithNullFont_Throws()
     {
         var doc = new PdfDocument();
@@ -132,8 +133,8 @@ public class PdfDocumentTests
         Assert.Throws<ArgumentNullException>(() => page.DrawText("Text", 50, 50, null!, 12));
     }
 
-    [Fact]
-    public void DrawLine_WritesGraphicsOperators()
+    [Test]
+    public async Task DrawLine_WritesGraphicsOperators()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -146,14 +147,14 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert (default coordinate system: BottomLeft, no Y flip)
-        Assert.Contains("50 100 m", content);
-        Assert.Contains("200 300 l", content);
-        Assert.Contains("1 w\n", content);         // default line width
-        Assert.Contains("S\n", content);           // stroke
+        await Assert.That(content).Contains("50 100 m");
+        await Assert.That(content).Contains("200 300 l");
+        await Assert.That(content).Contains("1 w\n");         // default line width
+        await Assert.That(content).Contains("S\n");           // stroke
     }
 
-    [Fact]
-    public void DrawRectangle_WritesRectOperator()
+    [Test]
+    public async Task DrawRectangle_WritesRectOperator()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -166,12 +167,12 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("50 100 100 50 re", content);  // rect
-        Assert.Contains("S\n", content);               // stroke
+        await Assert.That(content).Contains("50 100 100 50 re");  // rect
+        await Assert.That(content).Contains("S\n");               // stroke
     }
 
-    [Fact]
-    public void DrawRectangleFilled_WritesFillOperator()
+    [Test]
+    public async Task DrawRectangleFilled_WritesFillOperator()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -184,12 +185,12 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("50 100 100 50 re", content);
-        Assert.Contains("f\n", content);             // fill
+        await Assert.That(content).Contains("50 100 100 50 re");
+        await Assert.That(content).Contains("f\n");             // fill
     }
 
-    [Fact]
-    public void DrawImage_EmbedsXObject()
+    [Test]
+    public async Task DrawImage_EmbedsXObject()
     {
         // Arrange: minimal valid JPEG (1x1 pixel)
         byte[] jpeg =
@@ -217,17 +218,17 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("/Type /XObject", content);
-        Assert.Contains("/Subtype /Image", content);
-        Assert.Contains("/Width 1", content);
-        Assert.Contains("/Height 1", content);
-        Assert.Contains("/Filter /DCTDecode", content);
-        Assert.Contains("/ColorSpace /DeviceRGB", content);
-        Assert.Contains("/Im1", content);              // image reference in resources
-        Assert.Contains("q 200 0 0 150 50 100 cm /Im1 Do Q", content);
+        await Assert.That(content).Contains("/Type /XObject");
+        await Assert.That(content).Contains("/Subtype /Image");
+        await Assert.That(content).Contains("/Width 1");
+        await Assert.That(content).Contains("/Height 1");
+        await Assert.That(content).Contains("/Filter /DCTDecode");
+        await Assert.That(content).Contains("/ColorSpace /DeviceRGB");
+        await Assert.That(content).Contains("/Im1");              // image reference in resources
+        await Assert.That(content).Contains("q 200 0 0 150 50 100 cm /Im1 Do Q");
     }
 
-    [Fact]
+    [Test]
     public void DrawImage_WithNullImage_Throws()
     {
         var doc = new PdfDocument();
@@ -235,8 +236,8 @@ public class PdfDocumentTests
         Assert.Throws<ArgumentNullException>(() => page.DrawImage(null!, 50, 50, 100, 100));
     }
 
-    [Fact]
-    public void DocumentInfo_IsWritten()
+    [Test]
+    public async Task DocumentInfo_IsWritten()
     {
         // Arrange
         var doc = new PdfDocument
@@ -256,35 +257,35 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("/Type /Info", content);
-        Assert.Contains("Mein Titel", content);
-        Assert.Contains("Max Mustermann", content);
-        Assert.Contains("PdfDotNet", content);
+        await Assert.That(content).Contains("/Type /Info");
+        await Assert.That(content).Contains("Mein Titel");
+        await Assert.That(content).Contains("Max Mustermann");
+        await Assert.That(content).Contains("PdfDotNet");
     }
 
-    [Fact]
-    public void ColorTable_AddAndGet_ReturnsColor()
+    [Test]
+    public async Task ColorTable_AddAndGet_ReturnsColor()
     {
         // Arrange
         var doc = new PdfDocument();
         doc.ColorTable.Add("Brand", PdfColor.FromHex("#FF5733"));
 
         // Act & Assert
-        Assert.True(doc.ColorTable.Contains("Brand"));
-        Assert.True(doc.ColorTable.TryGet("Brand", out var color));
-        Assert.Equal(1, color!.R, 2);
-        Assert.Equal(doc.ColorTable["Brand"].R, color.R);
+        await Assert.That(doc.ColorTable.Contains("Brand")).IsTrue();
+        await Assert.That(doc.ColorTable.TryGet("Brand", out var color)).IsTrue();
+        await Assert.That(color!.R).IsCloseTo(1, 0.01);
+        await Assert.That(color.R).IsEqualTo(doc.ColorTable["Brand"].R);
     }
 
-    [Fact]
+    [Test]
     public void ColorTable_MissingName_Throws()
     {
         var doc = new PdfDocument();
-        Assert.Throws<KeyNotFoundException>(() => doc.ColorTable["Missing"]);
+        Assert.Throws<KeyNotFoundException>(() => _ = doc.ColorTable["Missing"]);
     }
 
-    [Fact]
-    public void AddUriLink_WritesAnnotObject()
+    [Test]
+    public async Task AddUriLink_WritesAnnotObject()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -297,15 +298,15 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("/Type /Annot", content);
-        Assert.Contains("/Subtype /Link", content);
-        Assert.Contains("/S /URI", content);
-        Assert.Contains("https://example.com", content);
-        Assert.Contains("/Rect [", content);
+        await Assert.That(content).Contains("/Type /Annot");
+        await Assert.That(content).Contains("/Subtype /Link");
+        await Assert.That(content).Contains("/S /URI");
+        await Assert.That(content).Contains("https://example.com");
+        await Assert.That(content).Contains("/Rect [");
     }
 
-    [Fact]
-    public void AddPageLink_WritesGoToAction()
+    [Test]
+    public async Task AddPageLink_WritesGoToAction()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -319,12 +320,12 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("/Type /Annot", content);
-        Assert.Contains("/Subtype /Link", content);
-        Assert.Contains("/S /GoTo", content);
+        await Assert.That(content).Contains("/Type /Annot");
+        await Assert.That(content).Contains("/Subtype /Link");
+        await Assert.That(content).Contains("/S /GoTo");
     }
 
-    [Fact]
+    [Test]
     public void AddLinkAnnotation_Null_Throws()
     {
         var doc = new PdfDocument();
@@ -332,15 +333,13 @@ public class PdfDocumentTests
         Assert.Throws<ArgumentNullException>(() => page.AddLinkAnnotation(null!));
     }
 
-    [Fact]
-    public void PdfA1b_Conformance_WritesMetadataOutputIntentLang()
+    [Test]
+    [TestFontFact]
+    public async Task PdfA1b_Conformance_WritesMetadataOutputIntentLang()
     {
         // Arrange
         var fontPath = FindTestFont();
-        if (fontPath == null)
-        {
-            return; // Test font not committed – skip (see testassets/README.md).
-        }
+        if (fontPath == null) throw new InvalidOperationException("The optional test font was not copied.");
 
         var doc = new PdfDocument
         {
@@ -372,16 +371,16 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.StartsWith("%PDF-1.7", content);
-        Assert.EndsWith("%%EOF", content.TrimEnd('\n', '\r'));
-        Assert.Contains("/Type /OutputIntent", content);
-        Assert.Contains("/S /GTS_PDFA1", content);
-        Assert.Contains("/DestOutputProfile", content);
-        Assert.Contains("/Type /Metadata", content);
-        Assert.Contains("/Subtype /XML", content);
-        Assert.Contains("/Lang (en-US)", content);
-        Assert.Contains("/Marked true", content);
-        Assert.Contains("/ID [", content);
+        await Assert.That(content).StartsWith("%PDF-1.7");
+        await Assert.That(content.TrimEnd('\n', '\r')).EndsWith("%%EOF");
+        await Assert.That(content).Contains("/Type /OutputIntent");
+        await Assert.That(content).Contains("/S /GTS_PDFA1");
+        await Assert.That(content).Contains("/DestOutputProfile");
+        await Assert.That(content).Contains("/Type /Metadata");
+        await Assert.That(content).Contains("/Subtype /XML");
+        await Assert.That(content).Contains("/Lang (en-US)");
+        await Assert.That(content).Contains("/Marked true");
+        await Assert.That(content).Contains("/ID [");
     }
 
     private static string? FindTestFont()
@@ -400,7 +399,7 @@ public class PdfDocumentTests
         return null;
     }
 
-    [Fact]
+    [Test]
     public void PdfA1b_WithBase14Font_Throws()
     {
         // Arrange
@@ -416,8 +415,8 @@ public class PdfDocumentTests
         Assert.Throws<InvalidOperationException>(() => doc.Save(ms));
     }
 
-    [Fact]
-    public void DigitalSignature_WritesSignatureStructure()
+    [Test]
+    public async Task DigitalSignature_WritesSignatureStructure()
     {
         // Arrange
         var doc = new PdfDocument();
@@ -440,21 +439,21 @@ public class PdfDocumentTests
         var content = System.Text.Encoding.UTF8.GetString(ms.ToArray());
 
         // Assert
-        Assert.Contains("/Type /AcroForm", content);
-        Assert.Contains("/FT /Sig", content);
-        Assert.Contains("/Type /Sig", content);
-        Assert.Contains("/Filter /Adobe.PPKLite", content);
-        Assert.Contains("/SubFilter /adbe.pkcs7.detached", content);
-        Assert.Contains("/ByteRange [", content);
-        Assert.Contains("/Contents <", content);
-        Assert.Contains("/Reason (Approval)", content);
-        Assert.Contains("/Location (Berlin)", content);
-        Assert.Contains("/ContactInfo (contact@example.com)", content);
-        Assert.Contains("/Name (Alice)", content);
-        Assert.Contains("/M (D:", content);
+        await Assert.That(content).Contains("/Type /AcroForm");
+        await Assert.That(content).Contains("/FT /Sig");
+        await Assert.That(content).Contains("/Type /Sig");
+        await Assert.That(content).Contains("/Filter /Adobe.PPKLite");
+        await Assert.That(content).Contains("/SubFilter /adbe.pkcs7.detached");
+        await Assert.That(content).Contains("/ByteRange [");
+        await Assert.That(content).Contains("/Contents <");
+        await Assert.That(content).Contains("/Reason (Approval)");
+        await Assert.That(content).Contains("/Location (Berlin)");
+        await Assert.That(content).Contains("/ContactInfo (contact@example.com)");
+        await Assert.That(content).Contains("/Name (Alice)");
+        await Assert.That(content).Contains("/M (D:");
     }
 
-    [Fact]
+    [Test]
     public void DigitalSignature_WrongLength_Throws()
     {
         // Arrange
@@ -473,7 +472,7 @@ public class PdfDocumentTests
         Assert.Throws<InvalidOperationException>(() => doc.Save(ms, options));
     }
 
-    [Fact]
+    [Test]
     public void DigitalSignature_MissingSignDelegate_Throws()
     {
         // Arrange

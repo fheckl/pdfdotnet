@@ -18,6 +18,7 @@ public sealed class PdfPage
     private readonly PdfDocument _document;
     private readonly PdfContentStream _content = new();
     private readonly List<PdfTextOperation> _textOperations = new();
+    private readonly List<(PdfFont Font, string Text)> _directTextUsage = new();
     private readonly Dictionary<PdfFont, string> _fontNames = new();
     private readonly Dictionary<PdfImage, string> _imageNames = new();
     private readonly List<PdfLinkAnnotation> _linkAnnotations = new();
@@ -385,7 +386,7 @@ public sealed class PdfPage
                 headerDrawnOnCurrentPage = true;
             }
 
-            DrawTableRow(content, table, dataRowIndex, currentX, currentY, isHeader,
+            DrawTableRow(currentPage, content, table, dataRowIndex, currentX, currentY, isHeader,
                 table.FontSize, table.Padding);
             currentY -= rowHeight;
             rowIdx++;
@@ -420,14 +421,14 @@ public sealed class PdfPage
     /// <summary>
     /// Draws a single table row onto the given content stream.
     /// </summary>
-    private void DrawTableRow(PdfContentStream content, PdfTable table, int dataRowIndex,
+    private void DrawTableRow(PdfPage page, PdfContentStream content, PdfTable table, int dataRowIndex,
         double startX, double topY, bool isHeader, double fontSize, double padding)
     {
         bool drawBorders = table.DrawBorders;
         double rowHeight = CalculateRowHeight(table, dataRowIndex, fontSize, padding);
         double rowBottom = topY - rowHeight;
 
-        string fontName = GetTableFontName(table.Font);
+        string fontName = page.GetFontName(table.Font);
 
         // Background for header.
         if (isHeader && table.HeaderBackground.HasValue)
@@ -477,6 +478,7 @@ public sealed class PdfPage
             for (int i = 0; i < lines.Count; i++)
             {
                 string line = lines[i];
+                page._directTextUsage.Add((table.Font, line));
                 double lineWidth = MeasureTextWidth(line, table.Font, fontSize);
                 double textX = colXText;
 
@@ -646,15 +648,6 @@ public sealed class PdfPage
             : y;
     }
 
-    private string GetTableFontName(PdfFont font)
-    {
-        if (_document.Fonts.Embedded.TryGetValue(font, out var embedded))
-        {
-            return embedded.PostScriptName.Replace(" ", string.Empty);
-        }
-        return font.BaseFont.Replace(" ", string.Empty);
-    }
-
     internal string GetFontName(PdfFont font)
     {
         if (_fontNames.TryGetValue(font, out var name)) return name;
@@ -675,6 +668,7 @@ public sealed class PdfPage
     internal IReadOnlyDictionary<PdfFont, string> FontNames => _fontNames;
     internal IReadOnlyDictionary<PdfImage, string> ImageNames => _imageNames;
     internal IReadOnlyList<PdfTextOperation> TextOperations => _textOperations;
+    internal IReadOnlyList<(PdfFont Font, string Text)> DirectTextUsage => _directTextUsage;
     internal IReadOnlyList<PdfLinkAnnotation> LinkAnnotations => _linkAnnotations;
 
     private static string Format(double value)

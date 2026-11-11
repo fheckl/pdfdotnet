@@ -1,12 +1,13 @@
+using System.IO;
 using pdfdotnet;
-using Xunit;
+using System.Threading.Tasks;
 
 namespace PdfDotNet.Tests;
 
 public class StreamingTests
 {
-    [Fact]
-    public void Save_ManyPages_ProducesValidPdf()
+    [Test]
+    public async Task Save_ManyPages_ProducesValidPdf()
     {
         // Arrange: 100 pages with text and graphics on each
         var doc = new PdfDocument();
@@ -26,26 +27,21 @@ public class StreamingTests
         var bytes = ms.ToArray();
 
         // Assert
-        Assert.True(bytes.Length > 0);
+        await Assert.That(bytes.Length > 0).IsTrue();
         var content = System.Text.Encoding.UTF8.GetString(bytes);
-        Assert.StartsWith("%PDF-1.7", content);
-        Assert.EndsWith("%%EOF", content.TrimEnd('\n', '\r'));
-        Assert.Contains("/Count 100", content);
-        Assert.Contains("Page 1", content);
-        Assert.Contains("Page 100", content);
+        await Assert.That(content).StartsWith("%PDF-1.7");
+        await Assert.That(content.TrimEnd('\n', '\r')).EndsWith("%%EOF");
+        await Assert.That(content).Contains("/Count 100");
+        await Assert.That(content).Contains("Page 1");
+        await Assert.That(content).Contains("Page 100");
     }
 
-    [Fact]
-    public void Save_ManyPages_WithEmbeddedFont_ProducesValidPdf()
+    [Test, TestFontFact]
+    public async Task Save_ManyPages_WithEmbeddedFont_ProducesValidPdf()
     {
-        if (!File.Exists("testassets/TestFont.ttf"))
-        {
-            return;
-        }
-
         // Arrange
         var doc = new PdfDocument();
-        using var fontStream = File.OpenRead("testassets/TestFont.ttf");
+        using var fontStream = File.OpenRead(Path.Combine(AppContext.BaseDirectory, "TestFont.ttf"));
         var font = doc.Fonts.AddEmbedded(fontStream, "StressFont");
 
         for (int i = 0; i < 50; i++)
@@ -60,12 +56,12 @@ public class StreamingTests
         var bytes = ms.ToArray();
 
         // Assert
-        Assert.True(bytes.Length > 0);
+        await Assert.That(bytes.Length > 0).IsTrue();
         var content = System.Text.Encoding.UTF8.GetString(bytes);
-        Assert.StartsWith("%PDF-1.7", content);
-        Assert.EndsWith("%%EOF", content.TrimEnd('\n', '\r'));
-        Assert.Contains("/Count 50", content);
-        Assert.Contains("/Subtype /TrueType", content);
-        Assert.Contains("/FontFile", content);
+        await Assert.That(content).StartsWith("%PDF-1.7");
+        await Assert.That(content.TrimEnd('\n', '\r')).EndsWith("%%EOF");
+        await Assert.That(content).Contains("/Count 50");
+        await Assert.That(content).Contains("/Subtype /TrueType");
+        await Assert.That(content).Contains("/FontFile");
     }
 }

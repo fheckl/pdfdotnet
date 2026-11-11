@@ -796,6 +796,14 @@ public sealed class PdfDocument : IDisposable
         var seen = new HashSet<PdfFont>();
         foreach (var page in _pages)
         {
+            foreach (var font in page.FontNames.Keys)
+            {
+                if (seen.Add(font))
+                {
+                    result.Add(font);
+                }
+            }
+
             foreach (var op in page.TextOperations)
             {
                 if (seen.Add(op.Font))
@@ -817,6 +825,17 @@ public sealed class PdfDocument : IDisposable
 
         foreach (var page in _pages)
         {
+            foreach (var (font, text) in page.DirectTextUsage)
+            {
+                if (result.TryGetValue(font, out var chars))
+                {
+                    foreach (char c in text)
+                    {
+                        chars.Add(c);
+                    }
+                }
+            }
+
             foreach (var op in page.TextOperations)
             {
                 if (result.TryGetValue(op.Font, out var chars))
