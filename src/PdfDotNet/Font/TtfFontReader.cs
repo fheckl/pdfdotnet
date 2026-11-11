@@ -132,16 +132,12 @@ internal sealed class TtfFontReader : IDisposable
     private void ReadHead()
     {
         if (!_tables.TryGetValue("head", out var head)) return;
-        _reader.BaseStream.Position = head.Offset;
-        _reader.ReadBytes(14); // version to unitsPerEm
+        _reader.BaseStream.Position = head.Offset + 18;
         UnitsPerEm = ReadUInt16(_reader);
         FontBBoxXMin = ReadInt16(_reader);
         FontBBoxYMin = ReadInt16(_reader);
         FontBBoxXMax = ReadInt16(_reader);
         FontBBoxYMax = ReadInt16(_reader);
-        Ascender = ReadInt16(_reader);
-        Descender = ReadInt16(_reader);
-        _reader.ReadBytes(20); // rest of head
     }
 
     private void ReadMaxp()
@@ -472,6 +468,20 @@ internal sealed class TtfFontReader : IDisposable
 
         _reader.BaseStream.Position = cmap.Offset + bestOffset;
         ushort cmapVersion = ReadUInt16(_reader); // format
+        if (cmapVersion == 0)
+        {
+            ushort length = ReadUInt16(_reader);
+            _reader.ReadUInt16(); // language
+            long subtableEnd = (long)cmap.Offset + bestOffset + length;
+            if (length < 262 || subtableEnd > (long)cmap.Offset + cmap.Length || subtableEnd > _fontData.Length) return;
+            for (int code = 0; code < 256; code++)
+            {
+                ushort glyphId = _reader.ReadByte();
+                if (glyphId != 0) Cmap[code] = glyphId;
+            }
+            return;
+        }
+        if (cmapVersion != 4) return;
         _reader.ReadBytes(4); // skip length + language
         ushort numSegmentsX2 = ReadUInt16(_reader); // segCountX2
         ushort numSegments = (ushort)(numSegmentsX2 / 2);

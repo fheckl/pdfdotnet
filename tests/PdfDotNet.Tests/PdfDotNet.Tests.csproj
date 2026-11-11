@@ -22,4 +22,10 @@
     <ProjectReference Include="..\..\src\PdfDotNet\PdfDotNet.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\testassets\TestFont.ttf" Link="TestFont.ttf"
+          CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\..\testassets\TestFont.ttf')" />
+  </ItemGroup>
+
 </Project>

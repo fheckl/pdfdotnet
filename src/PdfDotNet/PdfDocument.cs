@@ -338,6 +338,7 @@ public sealed class PdfDocument : IDisposable
                 writer.BeginObject(fontFileObj);
                 writer.WriteDictionaryStart();
                 writer.WriteKey("/Length", subset.SubsetData.Length.ToString());
+                writer.WriteKey("/Length1", subset.SubsetData.Length.ToString());
                 writer.WriteDictionaryEnd();
                 writer.WriteStream(subset.SubsetData);
                 writer.EndObject();
@@ -377,7 +378,7 @@ public sealed class PdfDocument : IDisposable
                 writer.WriteKey("/Type", "/Font");
                 writer.WriteKey("/Subtype", "/TrueType");
                 writer.WriteKey("/BaseFont", "/" + subset.PostScriptName);
-                writer.WriteKey("/FirstChar", "32");
+                writer.WriteKey("/FirstChar", "0");
                 writer.WriteKey("/LastChar", "255");
                 writer.WriteKey("/Encoding", "/WinAnsiEncoding");
                 var widths = BuildWidths(subset, usedGlyphs.TryGetValue(font, out var chars) ? chars : new HashSet<char>());
@@ -855,12 +856,13 @@ public sealed class PdfDocument : IDisposable
 
         foreach (var c in chars)
         {
-            var advanceWidth = subset.GetAdvanceWidthByCharCode(c);
+            char characterCode = c <= byte.MaxValue ? c : '?';
+            var advanceWidth = subset.GetAdvanceWidthByCharCode(characterCode);
             var unitsPerEm = subset.UnitsPerEm;
             var width = advanceWidth > 0 && unitsPerEm > 0
                 ? (int)Math.Round(advanceWidth * 1000.0 / unitsPerEm)
                 : 500;
-            widths[c] = width; // Index by character code (WinAnsiEncoding), not glyph ID
+            widths[characterCode] = width; // Index by character code (WinAnsiEncoding), not glyph ID
         }
 
         return widths;

@@ -123,27 +123,33 @@ public sealed class PdfEmbeddedFont : IDisposable
         sb.Append("1 begincodespacerange\n");
         sb.Append("<00><FF> endcodespacerange\n");
 
+        var mappings = new List<(int source, int unicode)>();
         if (GlyphMap.Count > 0)
         {
             // Subset font: character code → Unicode code point.
             // Content stream writes character codes (WinAnsi), cmap maps char code → glyph ID.
             // ToUnicode maps character code → Unicode code point (identity for Latin-1).
-            sb.Append($"{GlyphMap.Count} beginbfchar\n");
-            foreach (var kvp in GlyphMap.OrderBy(kvp => kvp.Key))
-            {
-                sb.Append($"<{(int)kvp.Key:X4}><{(int)kvp.Key:X4}>\n");
-            }
+            mappings.AddRange(GlyphMap.Keys.OrderBy(code => code).Select(code => ((int)code, (int)code)));
         }
         else
         {
             // Full font: character code → Unicode code point (identity mapping).
-            sb.Append("256 beginbfchar\n");
             for (int i = 0; i < 256; i++)
             {
-                sb.Append($"<{i:X4}><{i:X4}>\n");
+                mappings.Add((i, i));
             }
         }
-        sb.Append("endbfchar\n");
+        for (int start = 0; start < mappings.Count; start += 100)
+        {
+            int count = Math.Min(100, mappings.Count - start);
+            sb.Append($"{count} beginbfchar\n");
+            for (int i = start; i < start + count; i++)
+            {
+                var (source, unicode) = mappings[i];
+                sb.Append($"<{source:X4}><{unicode:X4}>\n");
+            }
+            sb.Append("endbfchar\n");
+        }
         sb.Append("endcmap\n");
         sb.Append("CMapName currentdict /CMap defineresource pop\n");
         sb.Append("end\n");
@@ -183,13 +189,28 @@ public sealed class PdfEmbeddedFont : IDisposable
 
         var glyphMap = new Dictionary<char, byte>();
         var advanceWidths = new Dictionary<char, short>();
+        var oldToNew = new Dictionary<ushort, byte> { [0] = 0 };
         byte nextIndex = 1; // 0 = .notdef
 
         foreach (char c in characters.OrderBy(c => c))
         {
+            if (c > byte.MaxValue)
+            {
+                throw new ArgumentOutOfRangeException(nameof(characters), c, "Subset characters must fit in one byte.");
+            }
+
             if (_reader.Cmap.TryGetValue(c, out ushort glyphId))
             {
-                glyphMap[c] = nextIndex++;
+                if (!oldToNew.TryGetValue(glyphId, out byte newGlyphId))
+                {
+                    if (nextIndex == 0)
+                    {
+                        throw new InvalidOperationException("A font subset cannot contain more than 255 distinct glyphs.");
+                    }
+                    newGlyphId = nextIndex++;
+                    oldToNew[glyphId] = newGlyphId;
+                }
+                glyphMap[c] = newGlyphId;
                 if (_reader.Hmtx.TryGetValue(glyphId, out var metrics))
                 {
                     advanceWidths[c] = metrics.advanceWidth;

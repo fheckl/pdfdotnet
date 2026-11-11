@@ -24,14 +24,30 @@ internal static class TtfSubsetBuilder
             }
         }
 
+        var pendingGlyphs = new Queue<ushort>(oldToNew.Keys);
+        while (pendingGlyphs.Count > 0)
+        {
+            ushort oldId = pendingGlyphs.Dequeue();
+            foreach (var component in GetCompositeComponents(reader.GetGlyphRawData(oldId)))
+            {
+                if (oldToNew.ContainsKey(component.glyphId)) continue;
+                if (oldToNew.Count >= 256)
+                {
+                    throw new InvalidOperationException("A font subset cannot contain more than 256 glyphs including .notdef.");
+                }
+                oldToNew[component.glyphId] = (byte)oldToNew.Count;
+                pendingGlyphs.Enqueue(component.glyphId);
+            }
+        }
+
         // ---- 3. Collect raw glyf data and metrics per new glyph ID ----
         var glyphData = new Dictionary<byte, byte[]>();
         var glyphMetrics = new Dictionary<byte, (short advance, short lsb)>();
-        foreach (var kvp in oldToNew)
+        foreach (var kvp in oldToNew.OrderBy(kvp => kvp.Value))
         {
             ushort oldId = kvp.Key;
             byte nid = kvp.Value;
-            glyphData[nid] = reader.GetGlyphRawData(oldId);
+            glyphData[nid] = RemapCompositeGlyph(reader.GetGlyphRawData(oldId), oldToNew);
             if (reader.Hmtx.TryGetValue(oldId, out var m))
             {
                 glyphMetrics[nid] = (m.Item1, m.Item2);
@@ -42,7 +58,7 @@ internal static class TtfSubsetBuilder
             }
         }
 
-        // ---- 4. Build cmap (format 4, one segment per used character + .notdef segment) ----
+        // ---- 4. Build cmap (format 0, WinAnsi character codes) ----
         var cmapEntries = new List<(ushort code, byte newGlyphId)>();
         foreach (var kvp in glyphMap)
         {
@@ -158,6 +174,7 @@ internal static class TtfSubsetBuilder
             if (glyphData.TryGetValue((byte)i, out var data))
             {
                 offset += (uint)data.Length;
+                if ((offset & 1) != 0) offset++;
             }
         }
         // Final offset (end of last glyph)
@@ -171,8 +188,53 @@ internal static class TtfSubsetBuilder
         foreach (var kvp in glyphData.OrderBy(k => k.Key))
         {
             ms.Write(kvp.Value, 0, kvp.Value.Length);
+            if ((ms.Length & 1) != 0) ms.WriteByte(0);
         }
         return ms.ToArray();
+    }
+
+    private static List<(ushort glyphId, int glyphIdOffset)> GetCompositeComponents(byte[] glyphData)
+    {
+        var components = new List<(ushort glyphId, int glyphIdOffset)>();
+        if (glyphData.Length == 0) return components;
+        if (glyphData.Length < 10) throw new InvalidDataException("Composite glyph header is truncated.");
+        if (ReadInt16BE(glyphData, 0) >= 0) return components;
+
+        int position = 10;
+        while (true)
+        {
+            if (position + 4 > glyphData.Length) throw new InvalidDataException("Composite glyph component is truncated.");
+            ushort flags = ReadUInt16BE(glyphData, position);
+            int glyphIdOffset = position + 2;
+            ushort glyphId = ReadUInt16BE(glyphData, glyphIdOffset);
+            position += 4;
+            position += (flags & 0x0001) != 0 ? 4 : 2;
+            if ((flags & 0x0008) != 0) position += 2;
+            else if ((flags & 0x0040) != 0) position += 4;
+            else if ((flags & 0x0080) != 0) position += 8;
+            if (position > glyphData.Length) throw new InvalidDataException("Composite glyph transform is truncated.");
+
+            components.Add((glyphId, glyphIdOffset));
+            if ((flags & 0x0020) == 0) break;
+        }
+        return components;
+    }
+
+    private static byte[] RemapCompositeGlyph(byte[] glyphData, IReadOnlyDictionary<ushort, byte> oldToNew)
+    {
+        var components = GetCompositeComponents(glyphData);
+        if (components.Count == 0) return glyphData;
+
+        var remapped = glyphData.ToArray();
+        foreach (var component in components)
+        {
+            if (!oldToNew.TryGetValue(component.glyphId, out byte newGlyphId))
+            {
+                throw new InvalidDataException($"Composite glyph references missing glyph {component.glyphId}.");
+            }
+            WriteUInt16BE(remapped, component.glyphIdOffset, newGlyphId);
+        }
+        return remapped;
     }
 
     private static byte[] BuildCmap(List<(ushort code, byte newGlyphId)> entries)
@@ -189,25 +251,37 @@ internal static class TtfSubsetBuilder
         uint cmapSubtableOffset = 6 + 8; // after header + 1 encoding record
         WriteUInt32BE(bw, cmapSubtableOffset);
 
-        // cmap subtable (format 0: simple byte-to-glyph mapping table)
-        // Maps character code (WinAnsi = Unicode code point for Latin-1) → glyph ID.
+        // cmap subtable (format 4: Windows Unicode BMP mapping)
+        entries.Sort((left, right) => left.code.CompareTo(right.code));
+        int segmentCount = entries.Count + 1;
+        int powerOfTwo = 1;
+        int entrySelector = 0;
+        while (powerOfTwo * 2 <= segmentCount)
+        {
+            powerOfTwo *= 2;
+            entrySelector++;
+        }
+
         bw.BaseStream.Position = cmapSubtableOffset;
-        WriteUInt16BE(bw, 0); // format
-        WriteUInt16BE(bw, 258); // length = 256 + 2 + 2
+        WriteUInt16BE(bw, 4); // format
+        WriteUInt16BE(bw, (ushort)(16 + 8 * segmentCount));
         WriteUInt16BE(bw, 0); // language
+        WriteUInt16BE(bw, (ushort)(2 * segmentCount)); // segCountX2
+        WriteUInt16BE(bw, (ushort)(2 * powerOfTwo)); // searchRange
+        WriteUInt16BE(bw, (ushort)entrySelector);
+        WriteUInt16BE(bw, (ushort)(2 * segmentCount - 2 * powerOfTwo)); // rangeShift
 
-        // Build glyph ID lookup: character code → glyph ID
-        var glyphIdByCode = new byte[256];
-        foreach (var e in entries)
+        foreach (var entry in entries) WriteUInt16BE(bw, entry.code);
+        WriteUInt16BE(bw, ushort.MaxValue);
+        WriteUInt16BE(bw, 0); // reservedPad
+        foreach (var entry in entries) WriteUInt16BE(bw, entry.code);
+        WriteUInt16BE(bw, ushort.MaxValue);
+        foreach (var entry in entries)
         {
-            if (e.code < 256)
-                glyphIdByCode[e.code] = e.newGlyphId;
+            WriteUInt16BE(bw, unchecked((ushort)(entry.newGlyphId - entry.code)));
         }
-
-        for (int i = 0; i < 256; i++)
-        {
-            bw.Write(glyphIdByCode[i]);
-        }
+        WriteUInt16BE(bw, 1); // maps the 0xFFFF sentinel to glyph 0
+        for (int i = 0; i < segmentCount; i++) WriteUInt16BE(bw, 0); // idRangeOffset
 
         return ms.ToArray();
     }
@@ -216,6 +290,9 @@ internal static class TtfSubsetBuilder
     {
         var orderedTags = new[] { "head", "hhea", "maxp", "hmtx", "loca", "glyf", "cmap", "name", "post" };
         var present = orderedTags.Where(t => tables.ContainsKey(t)).ToList();
+        Array.Clear(tables["head"], 8, 4);
+        var tableChecksums = present.ToDictionary(tag => tag,
+            tag => ComputeChecksum(tables[tag], tag == "head"));
 
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
@@ -254,14 +331,35 @@ internal static class TtfSubsetBuilder
         foreach (var tag in present)
         {
             bw.Write(Encoding.ASCII.GetBytes(tag));
-            WriteUInt32BE(bw, 0); // checksum (placeholder)
+            WriteUInt32BE(bw, tableChecksums[tag]);
             WriteUInt32BE(bw, tableOffsets[tag]);
             WriteUInt32BE(bw, (uint)tables[tag].Length);
         }
 
-        // Fix checksums (simplified: set head checksum so total = 0xB1B0AFBA)
-        // For MVP we leave checksums at 0; most viewers accept this.
-        return ms.ToArray();
+        byte[] fontData = ms.ToArray();
+        uint checkSumAdjustment = unchecked(0xB1B0AFBAu - ComputeChecksum(fontData));
+        WriteUInt32BE(fontData, (int)tableOffsets["head"] + 8, checkSumAdjustment);
+        return fontData;
+    }
+
+    private static uint ComputeChecksum(byte[] data, bool zeroHeadAdjustment = false)
+    {
+        uint checksum = 0;
+        for (int offset = 0; offset < data.Length; offset += 4)
+        {
+            uint word = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                word <<= 8;
+                int index = offset + i;
+                if (index < data.Length && !(zeroHeadAdjustment && index >= 8 && index < 12))
+                {
+                    word |= data[index];
+                }
+            }
+            checksum = unchecked(checksum + word);
+        }
+        return checksum;
     }
 
     private static int Align4(int offset) => (offset + 3) & ~3;
@@ -278,6 +376,20 @@ internal static class TtfSubsetBuilder
         bw.Write((byte)(value >> 16));
         bw.Write((byte)(value >> 8));
         bw.Write((byte)value);
+    }
+
+    private static void WriteUInt16BE(byte[] data, int offset, ushort value)
+    {
+        data[offset] = (byte)(value >> 8);
+        data[offset + 1] = (byte)value;
+    }
+
+    private static void WriteUInt32BE(byte[] data, int offset, uint value)
+    {
+        data[offset] = (byte)(value >> 24);
+        data[offset + 1] = (byte)(value >> 16);
+        data[offset + 2] = (byte)(value >> 8);
+        data[offset + 3] = (byte)value;
     }
 
     private static void WriteInt16BE(BinaryWriter bw, short value)
@@ -297,4 +409,10 @@ internal static class TtfSubsetBuilder
                ((uint)br.ReadByte() << 8) |
                br.ReadByte();
     }
+
+    private static short ReadInt16BE(byte[] data, int offset) =>
+        unchecked((short)ReadUInt16BE(data, offset));
+
+    private static ushort ReadUInt16BE(byte[] data, int offset) =>
+        (ushort)((data[offset] << 8) | data[offset + 1]);
 }
