@@ -133,7 +133,7 @@ internal sealed class TtfFontReader : IDisposable
     {
         if (!_tables.TryGetValue("head", out var head)) return;
         _reader.BaseStream.Position = head.Offset;
-        _reader.ReadBytes(18); // version to created
+        _reader.ReadBytes(14); // version to unitsPerEm
         UnitsPerEm = ReadUInt16(_reader);
         FontBBoxXMin = ReadInt16(_reader);
         FontBBoxYMin = ReadInt16(_reader);
@@ -141,7 +141,7 @@ internal sealed class TtfFontReader : IDisposable
         FontBBoxYMax = ReadInt16(_reader);
         Ascender = ReadInt16(_reader);
         Descender = ReadInt16(_reader);
-        _reader.ReadBytes(22); // rest of head
+        _reader.ReadBytes(20); // rest of head
     }
 
     private void ReadMaxp()
