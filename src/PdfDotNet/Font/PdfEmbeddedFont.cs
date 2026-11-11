@@ -11,10 +11,12 @@ public sealed class PdfEmbeddedFont : IDisposable
     private readonly TtfFontReader? _reader;
     private readonly byte[] _fontData;
     private readonly Dictionary<char, short> _advanceWidths = new();
+    private readonly Dictionary<(char left, char right), int> _kerningAdjustments;
 
     private PdfEmbeddedFont(string baseName, string postScriptName, byte[] subsetData,
         Dictionary<char, byte> glyphMap, short ascent, short descent, ushort unitsPerEm,
         Dictionary<char, short> advanceWidths,
+        Dictionary<(char left, char right), int> kerningAdjustments,
         TtfFontReader? reader, byte[] fontData,
         short fontBBoxXMin, short fontBBoxYMin, short fontBBoxXMax, short fontBBoxYMax,
         short fontXHeight, short capHeight)
@@ -33,6 +35,7 @@ public sealed class PdfEmbeddedFont : IDisposable
         FontBBoxYMax = fontBBoxYMax;
         XHeight = fontXHeight;
         _advanceWidths = advanceWidths;
+        _kerningAdjustments = kerningAdjustments;
         _reader = reader;
         _fontData = fontData;
     }
@@ -107,6 +110,18 @@ public sealed class PdfEmbeddedFont : IDisposable
         return 0;
     }
 
+    internal int GetKerningAdjustment(char left, char right)
+    {
+        if (_reader != null)
+        {
+            return _reader.GetKerningAdjustment(left, right);
+        }
+
+        return _kerningAdjustments.TryGetValue((left, right), out int adjustment)
+            ? adjustment
+            : 0;
+    }
+
     /// <summary>
     /// Builds a ToUnicode CMap.
     /// </summary>
@@ -171,7 +186,8 @@ public sealed class PdfEmbeddedFont : IDisposable
 
         return new PdfEmbeddedFont(postScriptName, postScriptName, reader.FontData,
             new Dictionary<char, byte>(), reader.WinAscent, reader.WinDescent, reader.UnitsPerEm,
-            new Dictionary<char, short>(), reader, reader.FontData,
+            new Dictionary<char, short>(), new Dictionary<(char left, char right), int>(),
+            reader, reader.FontData,
             reader.FontBBoxXMin, reader.FontBBoxYMin, reader.FontBBoxXMax, reader.FontBBoxYMax,
             reader.XHeight, reader.CapHeight);
     }
@@ -187,6 +203,7 @@ public sealed class PdfEmbeddedFont : IDisposable
 
         var glyphMap = new Dictionary<char, byte>();
         var advanceWidths = new Dictionary<char, short>();
+        var kerningAdjustments = new Dictionary<(char left, char right), int>();
         var oldToNew = new Dictionary<ushort, byte> { [0] = 0 };
         byte nextIndex = 1; // 0 = .notdef
 
@@ -220,8 +237,23 @@ public sealed class PdfEmbeddedFont : IDisposable
             ? Array.Empty<byte>()
             : TtfSubsetBuilder.Build(_reader, glyphMap);
 
+        foreach (char left in characters)
+        {
+            if (!glyphMap.ContainsKey(left)) continue;
+
+            foreach (char right in characters)
+            {
+                if (!glyphMap.ContainsKey(right)) continue;
+                int adjustment = _reader.GetKerningAdjustment(left, right);
+                if (adjustment != 0)
+                {
+                    kerningAdjustments[(left, right)] = adjustment;
+                }
+            }
+        }
+
         return new PdfEmbeddedFont(subsetName, subsetName, subsetData,
-            glyphMap, Ascent, Descent, UnitsPerEm, advanceWidths, null, _fontData,
+            glyphMap, Ascent, Descent, UnitsPerEm, advanceWidths, kerningAdjustments, null, _fontData,
             FontBBoxXMin, FontBBoxYMin, FontBBoxXMax, FontBBoxYMax,
             XHeight, CapHeight);
     }

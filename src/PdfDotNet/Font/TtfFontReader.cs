@@ -89,9 +89,24 @@ internal sealed class TtfFontReader : IDisposable
     /// </summary>
     public Dictionary<ushort, (short advanceWidth, short leftSideBearing)> Hmtx { get; } = new();
 
+    private readonly Dictionary<(ushort leftGlyph, ushort rightGlyph), int> _kerningPairs = new();
+
     public void Dispose()
     {
         _reader.Dispose();
+    }
+
+    public int GetKerningAdjustment(char left, char right)
+    {
+        if (!Cmap.TryGetValue(left, out ushort leftGlyph) ||
+            !Cmap.TryGetValue(right, out ushort rightGlyph))
+        {
+            return 0;
+        }
+
+        return _kerningPairs.TryGetValue((leftGlyph, rightGlyph), out int adjustment)
+            ? adjustment
+            : 0;
     }
 
     private static byte[] ReadAllBytes(Stream stream)
@@ -127,6 +142,89 @@ internal sealed class TtfFontReader : IDisposable
         ReadGlyf();
         ReadCmap();
         ReadOs2();
+        ReadKern();
+    }
+
+    private void ReadKern()
+    {
+        if (!_tables.TryGetValue("kern", out var kern))
+        {
+            return;
+        }
+
+        long tableStart = kern.Offset;
+        long tableEnd = tableStart + kern.Length;
+        if (kern.Length < 4 || tableEnd > _fontData.LongLength)
+        {
+            throw new InvalidDataException("TTF 'kern' table is truncated.");
+        }
+
+        _reader.BaseStream.Position = tableStart;
+        ushort version = ReadUInt16(_reader);
+        ushort subtableCount = ReadUInt16(_reader);
+        if (version != 0)
+        {
+            return;
+        }
+
+        long subtablePosition = tableStart + 4;
+        for (int i = 0; i < subtableCount; i++)
+        {
+            if (subtablePosition + 6 > tableEnd)
+            {
+                throw new InvalidDataException("TTF 'kern' subtable header is truncated.");
+            }
+
+            _reader.BaseStream.Position = subtablePosition;
+            ushort subtableVersion = ReadUInt16(_reader);
+            ushort subtableLength = ReadUInt16(_reader);
+            ushort coverage = ReadUInt16(_reader);
+            long subtableEnd = subtablePosition + subtableLength;
+            if (subtableLength < 6 || subtableEnd > tableEnd)
+            {
+                throw new InvalidDataException("TTF 'kern' subtable is truncated.");
+            }
+
+            byte format = (byte)(coverage >> 8);
+            bool horizontal = (coverage & 0x0001) != 0;
+            bool minimum = (coverage & 0x0002) != 0;
+            bool crossStream = (coverage & 0x0004) != 0;
+            bool shouldOverride = (coverage & 0x0008) != 0;
+            if (subtableVersion == 0 && format == 0 && horizontal && !minimum && !crossStream)
+            {
+                if (subtableLength < 14)
+                {
+                    throw new InvalidDataException("TTF format 0 'kern' subtable is truncated.");
+                }
+
+                _reader.BaseStream.Position = subtablePosition + 6;
+                ushort pairCount = ReadUInt16(_reader);
+                long pairPosition = subtablePosition + 14;
+                if (pairPosition + pairCount * 6L > subtableEnd)
+                {
+                    throw new InvalidDataException("TTF format 0 'kern' pairs are truncated.");
+                }
+
+                for (int pairIndex = 0; pairIndex < pairCount; pairIndex++)
+                {
+                    _reader.BaseStream.Position = pairPosition + pairIndex * 6L;
+                    ushort leftGlyph = ReadUInt16(_reader);
+                    ushort rightGlyph = ReadUInt16(_reader);
+                    short value = ReadInt16(_reader);
+                    var key = (leftGlyph, rightGlyph);
+                    if (shouldOverride || !_kerningPairs.TryGetValue(key, out int existingValue))
+                    {
+                        _kerningPairs[key] = value;
+                    }
+                    else
+                    {
+                        _kerningPairs[key] = existingValue + value;
+                    }
+                }
+            }
+
+            subtablePosition = subtableEnd;
+        }
     }
 
     private void ReadHead()

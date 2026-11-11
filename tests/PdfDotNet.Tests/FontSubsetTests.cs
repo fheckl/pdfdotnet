@@ -200,6 +200,32 @@ public class FontSubsetTests
         await Assert.That(widths['?']).IsEqualTo(ToPdfWidth(reader.Hmtx[reader.Cmap['?']].advanceWidth, reader.UnitsPerEm));
     }
 
+    [Test, TestFontFact]
+    public async Task EmbeddedFont_KerningAffectsMeasuredWidthAndPdfText()
+    {
+        var doc = new PdfDocument();
+        using var fontStream = File.OpenRead(TestFontPath);
+        var font = doc.Fonts.AddEmbedded(fontStream, "TestFont");
+        var page = doc.AddPage(PdfPaperSize.A4);
+
+        double kernedWidth = page.MeasureTextWidth("AV", font, 12);
+        double unkernedWidth = page.MeasureTextWidth("A", font, 12) + page.MeasureTextWidth("V", font, 12);
+        await Assert.That(kernedWidth).IsLessThan(unkernedWidth);
+
+        page.DrawText("AV", 50, 800, font, 12);
+        using var ms = new MemoryStream();
+        doc.Save(ms);
+        var content = System.Text.Encoding.Latin1.GetString(ms.ToArray());
+        var adjustment = Regex.Match(content, @"\[\(A\)\s+([\d.]+)\s+\(V\)\]\s+TJ");
+
+        await Assert.That(adjustment.Success).IsTrue();
+        using var readerStream = File.OpenRead(TestFontPath);
+        using var reader = new TtfFontReader(readerStream);
+        double expectedAdjustment = -reader.GetKerningAdjustment('A', 'V') * 1000.0 / reader.UnitsPerEm;
+        double actualAdjustment = double.Parse(adjustment.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        await Assert.That(actualAdjustment).IsEqualTo(Math.Round(expectedAdjustment, 2));
+    }
+
     private static int ToPdfWidth(short advanceWidth, ushort unitsPerEm) =>
         (int)Math.Round(advanceWidth * 1000.0 / unitsPerEm);
 

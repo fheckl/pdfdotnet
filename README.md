@@ -101,6 +101,18 @@ double endY = page.DrawWrappedText(
 );
 ```
 
+## Text Measurement
+
+`PdfPage.MeasureTextWidth` returns a text width in PDF points. Using the embedded `font` from Quick Start, align text to a known column edge:
+
+```csharp
+var text = "Total";
+double textWidth = page.MeasureTextWidth(text, font, 14);
+page.DrawText(text, 550 - textWidth, 370, font, 14);
+```
+
+Embedded TTF fonts apply legacy `kern` format 0 pair adjustments to measurement and PDF output. GPOS-based kerning and complex text shaping are not supported. Base-14 fonts use a rough half-em estimate.
+
 ## Streaming for large documents
 
 Since v0.5 every page is written immediately to the target stream. Memory usage is therefore independent of the page count:
@@ -147,5 +159,5 @@ The following items were identified while recreating the `old_data/` reference P
 
 - **Form XObject rendering** — The reference PDFs embed form XObjects (`/Fm0`, zeiss-icon header, 24×24 icon) that PdfDotNet cannot draw yet. Add `/Form` XObject rendering support.
 - **Missing source image** — `20261104-Etiketten_Optikteile.pdf` references a 501×496 image that is not present in `old_data/images/` (only `zeiss-icon.png` 80×80 is available). The recreation uses `zeiss-icon.png` as a placeholder.
-- **No text measurement API** — There is no public API to measure text width for embedded fonts, making precise column positioning manual. Expose glyph-width measurement.
+- **Text measurement limits** — `PdfPage.MeasureTextWidth` supports legacy TrueType `kern` format 0 pairs. It does not support GPOS-based kerning or complex shaping. Base-14 font widths use a rough half-em estimate.
 

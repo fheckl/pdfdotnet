@@ -74,6 +74,7 @@ public class TableTests
         var table = new PdfTable { Font = font };
         table.AddColumn("Name", 100);
         table.AddRow("Alice", "100");
+        table.AddRow("AV", "100");
 
         // Act
         page.DrawTable(table, 50, 800);
@@ -85,6 +86,7 @@ public class TableTests
         await Assert.That(content).Contains("/Subtype /TrueType");
         await Assert.That(content).Contains("/FontFile");
         await Assert.That(content).Contains("/F1 10 Tf");
+        await Assert.That(content).Contains("TJ");
         await Assert.That(Regex.IsMatch(content, @"/F1\s+\d+\s+0 R")).IsTrue();
         var widths = Regex.Match(content, @"/Widths\s+\[([^\]]+)\]");
         await Assert.That(widths.Success).IsTrue();

@@ -64,6 +64,49 @@ internal sealed class PdfContentStream
         _commands.Append(") Tj\n");
     }
 
+    public void ShowTextWithKerning(string text, Func<char, char, int> getKerningAdjustment, ushort unitsPerEm)
+    {
+        if (string.IsNullOrEmpty(text) || unitsPerEm == 0)
+        {
+            ShowText(text);
+            return;
+        }
+
+        var characters = new char[text.Length];
+        var adjustments = new int[Math.Max(0, text.Length - 1)];
+        bool hasKerning = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            characters[i] = text[i] <= byte.MaxValue ? text[i] : '?';
+            if (i == 0) continue;
+
+            adjustments[i - 1] = getKerningAdjustment(characters[i - 1], characters[i]);
+            hasKerning |= adjustments[i - 1] != 0;
+        }
+
+        if (!hasKerning)
+        {
+            ShowText(text);
+            return;
+        }
+
+        _commands.Append('[');
+        for (int i = 0; i < characters.Length; i++)
+        {
+            if (i > 0 && adjustments[i - 1] != 0)
+            {
+                double pdfAdjustment = -adjustments[i - 1] * 1000.0 / unitsPerEm;
+                _commands.Append(FormatNumber(pdfAdjustment)).Append(' ');
+            }
+
+            _commands.Append('(');
+            _commands.Append(PdfStringEncoder.Encode(characters[i].ToString()));
+            _commands.Append(')');
+            if (i < characters.Length - 1) _commands.Append(' ');
+        }
+        _commands.Append("] TJ\n");
+    }
+
     /// <summary>
     /// Shows an array of glyph IDs (TJ). Each glyph ID is written as a hex byte.
     /// </summary>

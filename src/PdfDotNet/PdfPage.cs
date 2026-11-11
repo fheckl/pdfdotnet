@@ -500,7 +500,7 @@ public sealed class PdfPage
                 content.BeginText();
                 content.SetFont(fontName, fontSize);
                 content.SetTextPosition(textX, lineY);
-                content.ShowText(line);
+                ShowText(content, line, table.Font);
                 content.EndText();
             }
 
@@ -509,7 +509,7 @@ public sealed class PdfPage
     }
 
     /// <summary>
-    /// Measures the width of a text string in PDF points.
+    /// Measures text width in PDF points, including available kerning for embedded fonts.
     /// </summary>
     /// <param name="text">The text to measure.</param>
     /// <param name="font">The font to use.</param>
@@ -520,13 +520,21 @@ public sealed class PdfPage
         double width = 0;
         if (_document.Fonts.Embedded.TryGetValue(font, out var embedded))
         {
-            foreach (char c in text)
+            char? previous = null;
+            foreach (char value in text)
             {
+                char c = value <= byte.MaxValue ? value : '?';
+                if (previous.HasValue)
+                {
+                    width += embedded.GetKerningAdjustment(previous.Value, c) * size / embedded.UnitsPerEm;
+                }
+
                 short units = embedded.GetAdvanceWidth(c);
                 if (units > 0)
                     width += units * size / embedded.UnitsPerEm;
                 else
                     width += 0.5 * size;
+                previous = c;
             }
         }
         else
@@ -534,6 +542,18 @@ public sealed class PdfPage
             width = text.Length * 0.5 * size;
         }
         return width;
+    }
+
+    private void ShowText(PdfContentStream content, string text, PdfFont font)
+    {
+        if (_document.Fonts.Embedded.TryGetValue(font, out var embedded))
+        {
+            content.ShowTextWithKerning(text, embedded.GetKerningAdjustment, embedded.UnitsPerEm);
+        }
+        else
+        {
+            content.ShowText(text);
+        }
     }
 
     /// <summary>
@@ -608,11 +628,9 @@ public sealed class PdfPage
             content.SetFont(fontName, op.Size);
             content.SetTextPosition(op.X, yAdjusted);
 
-            if (glyphMaps.TryGetValue(op.Font, out var glyphMap))
+            if (glyphMaps.TryGetValue(op.Font, out _))
             {
-                // Embedded font: emit text as literal string with WinAnsi character codes.
-                // The cmap maps character code → glyph ID.
-                content.ShowText(op.Text);
+                ShowText(content, op.Text, op.Font);
             }
             else
             {
