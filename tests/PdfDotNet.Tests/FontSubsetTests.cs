@@ -1,8 +1,8 @@
 using System.IO;
-using pdfdotnet;
-using pdfdotnet.Font;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using pdfdotnet;
+using pdfdotnet.Font;
 
 namespace PdfDotNet.Tests;
 

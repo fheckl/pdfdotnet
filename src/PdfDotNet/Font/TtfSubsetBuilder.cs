@@ -64,7 +64,7 @@ internal static class TtfSubsetBuilder
         {
             if (kvp.Value != 0)
             {
-                cmapEntries.Add(( (ushort)kvp.Key, kvp.Value ));
+                cmapEntries.Add(((ushort)kvp.Key, kvp.Value));
             }
         }
         cmapEntries.Sort((a, b) => a.code.CompareTo(b.code));

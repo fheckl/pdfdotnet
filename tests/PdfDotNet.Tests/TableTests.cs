@@ -1,7 +1,7 @@
 using System.IO;
-using pdfdotnet;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using pdfdotnet;
 
 namespace PdfDotNet.Tests;
 

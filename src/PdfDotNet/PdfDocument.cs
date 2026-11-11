@@ -1,11 +1,11 @@
 namespace pdfdotnet;
 
-using pdfdotnet.Font;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using pdfdotnet.Font;
 
 /// <summary>
 /// Collection of embedded fonts for a document.

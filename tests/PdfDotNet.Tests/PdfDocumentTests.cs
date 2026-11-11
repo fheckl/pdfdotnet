@@ -1,6 +1,6 @@
 using System.IO;
-using pdfdotnet;
 using System.Threading.Tasks;
+using pdfdotnet;
 
 namespace PdfDotNet.Tests;
 
