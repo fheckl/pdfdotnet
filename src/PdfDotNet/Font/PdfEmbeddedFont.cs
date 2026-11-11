@@ -15,7 +15,9 @@ public sealed class PdfEmbeddedFont : IDisposable
     private PdfEmbeddedFont(string baseName, string postScriptName, byte[] subsetData,
         Dictionary<char, byte> glyphMap, short ascent, short descent, ushort unitsPerEm,
         Dictionary<char, short> advanceWidths,
-        TtfFontReader? reader, byte[] fontData)
+        TtfFontReader? reader, byte[] fontData,
+        short fontBBoxXMin, short fontBBoxYMin, short fontBBoxXMax, short fontBBoxYMax,
+        short fontXHeight, short capHeight)
     {
         BaseName = baseName;
         PostScriptName = postScriptName;
@@ -24,6 +26,12 @@ public sealed class PdfEmbeddedFont : IDisposable
         Ascent = ascent;
         Descent = descent;
         UnitsPerEm = unitsPerEm;
+        CapHeight = capHeight;
+        FontBBoxXMin = fontBBoxXMin;
+        FontBBoxYMin = fontBBoxYMin;
+        FontBBoxXMax = fontBBoxXMax;
+        FontBBoxYMax = fontBBoxYMax;
+        XHeight = fontXHeight;
         _advanceWidths = advanceWidths;
         _reader = reader;
         _fontData = fontData;
@@ -43,14 +51,28 @@ public sealed class PdfEmbeddedFont : IDisposable
     /// </summary>
     public Dictionary<char, byte> GlyphMap { get; }
 
-    /// <summary>Font ascent in font units.</summary>
+    /// <summary>Font ascent in font units (from OS/2 table usWinAscent).</summary>
     public short Ascent { get; }
 
-    /// <summary>Font descent in font units.</summary>
+    /// <summary>Font descent in font units (from OS/2 table usWinDescent).</summary>
     public short Descent { get; }
 
     /// <summary>Units per EM.</summary>
     public ushort UnitsPerEm { get; }
+
+    /// <summary>Cap height (from OS/2 table).</summary>
+    public short CapHeight { get; }
+
+    /// <summary>
+    /// Font bounding box from head table.
+    /// </summary>
+    public short FontBBoxXMin { get; }
+    public short FontBBoxYMin { get; }
+    public short FontBBoxXMax { get; }
+    public short FontBBoxYMax { get; }
+
+    /// <summary>X height (from OS/2 table).</summary>
+    public short XHeight { get; }
 
     /// <summary>
     /// Returns the advance width of a character in font units, or 0 if unknown.
@@ -146,8 +168,10 @@ public sealed class PdfEmbeddedFont : IDisposable
 
         // Embed the full font without subsetting.
         return new PdfEmbeddedFont(postScriptName, postScriptName, reader.FontData,
-            new Dictionary<char, byte>(), reader.Ascender, reader.Descender, reader.UnitsPerEm,
-            new Dictionary<char, short>(), reader, reader.FontData);
+            new Dictionary<char, byte>(), reader.WinAscent, reader.WinDescent, reader.UnitsPerEm,
+            new Dictionary<char, short>(), reader, reader.FontData,
+            reader.FontBBoxXMin, reader.FontBBoxYMin, reader.FontBBoxXMax, reader.FontBBoxYMax,
+            reader.XHeight, reader.CapHeight);
     }
 
     /// <summary>
@@ -178,7 +202,9 @@ public sealed class PdfEmbeddedFont : IDisposable
             : TtfSubsetBuilder.Build(_reader, glyphMap);
 
         return new PdfEmbeddedFont(subsetName, PostScriptName, subsetData,
-            glyphMap, Ascent, Descent, UnitsPerEm, advanceWidths, null, _fontData);
+            glyphMap, Ascent, Descent, UnitsPerEm, advanceWidths, null, _fontData,
+            FontBBoxXMin, FontBBoxYMin, FontBBoxXMax, FontBBoxYMax,
+            XHeight, CapHeight);
     }
 
     public void Dispose()

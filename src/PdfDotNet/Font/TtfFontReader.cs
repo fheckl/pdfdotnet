@@ -36,6 +36,34 @@ internal sealed class TtfFontReader : IDisposable
     public ushort UnitsPerEm { get; private set; }
 
     /// <summary>
+    /// Font bounding box from head table.
+    /// </summary>
+    public short FontBBoxXMin { get; private set; }
+    public short FontBBoxYMin { get; private set; }
+    public short FontBBoxXMax { get; private set; }
+    public short FontBBoxYMax { get; private set; }
+
+    /// <summary>
+    /// WinAscent (from OS/2 table).
+    /// </summary>
+    public short WinAscent { get; private set; }
+
+    /// <summary>
+    /// WinDescent (from OS/2 table).
+    /// </summary>
+    public short WinDescent { get; private set; }
+
+    /// <summary>
+    /// Cap height (from OS/2 table).
+    /// </summary>
+    public short CapHeight { get; private set; }
+
+    /// <summary>
+    /// X height (from OS/2 table).
+    /// </summary>
+    public short XHeight { get; private set; }
+
+    /// <summary>
     /// Ascender (from head table or hhea).
     /// </summary>
     public short Ascender { get; private set; }
@@ -98,6 +126,7 @@ internal sealed class TtfFontReader : IDisposable
         ReadLoca();
         ReadGlyf();
         ReadCmap();
+        ReadOs2();
     }
 
     private void ReadHead()
@@ -106,7 +135,10 @@ internal sealed class TtfFontReader : IDisposable
         _reader.BaseStream.Position = head.Offset;
         _reader.ReadBytes(18); // version to created
         UnitsPerEm = ReadUInt16(_reader);
-        _reader.ReadBytes(8); // xMin, yMin, xMax, yMax
+        FontBBoxXMin = ReadInt16(_reader);
+        FontBBoxYMin = ReadInt16(_reader);
+        FontBBoxXMax = ReadInt16(_reader);
+        FontBBoxYMax = ReadInt16(_reader);
         Ascender = ReadInt16(_reader);
         Descender = ReadInt16(_reader);
         _reader.ReadBytes(22); // rest of head
@@ -490,6 +522,34 @@ internal sealed class TtfFontReader : IDisposable
                     Cmap[code] = glyphId;
                 }
             }
+        }
+    }
+
+    private void ReadOs2()
+    {
+        if (!_tables.TryGetValue("OS/2", out var os2)) return;
+        _reader.BaseStream.Position = os2.Offset;
+        ushort version = ReadUInt16(_reader);
+
+        // Offset 20: usWinAscent (2 bytes)
+        _reader.BaseStream.Position = os2.Offset + 20;
+        WinAscent = ReadInt16(_reader);
+
+        // Offset 22: usWinDescent (2 bytes)
+        WinDescent = ReadInt16(_reader);
+
+        // Offset 72: sCapHeight (2 bytes) - version 1+
+        if (version >= 1)
+        {
+            _reader.BaseStream.Position = os2.Offset + 72;
+            CapHeight = ReadInt16(_reader);
+        }
+
+        // Offset 74: sXHeight (2 bytes) - version 1+
+        if (version >= 1)
+        {
+            _reader.BaseStream.Position = os2.Offset + 74;
+            XHeight = ReadInt16(_reader);
         }
     }
 }

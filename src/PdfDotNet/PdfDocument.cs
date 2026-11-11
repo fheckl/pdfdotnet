@@ -349,10 +349,9 @@ public sealed class PdfDocument : IDisposable
                 writer.WriteKey("/Type", "/FontDescriptor");
                 writer.WriteKey("/FontName", "/" + subset.PostScriptName);
                 writer.WriteKey("/Ascent", subset.Ascent.ToString(CultureInfo.InvariantCulture));
-                writer.WriteKey("/Descent", subset.Descent.ToString(CultureInfo.InvariantCulture));
-                writer.WriteKey("/CapHeight", "700");
-                writer.WriteKey("/XHeight", "500");
-                writer.WriteKey("/FontBBox", "[-280 -260 1060 1041]");
+                writer.WriteKey("/Descent", (-subset.Descent).ToString(CultureInfo.InvariantCulture));
+                writer.WriteKey("/CapHeight", subset.CapHeight.ToString(CultureInfo.InvariantCulture));
+                writer.WriteKey("/XHeight", subset.XHeight.ToString(CultureInfo.InvariantCulture));
                 writer.WriteKey("/ItalicAngle", "0");
                 writer.WriteKey("/StemV", "0");
                 writer.WriteKey("/Flags", "32");
@@ -376,7 +375,7 @@ public sealed class PdfDocument : IDisposable
                 writer.WriteKey("/Type", "/Font");
                 writer.WriteKey("/Subtype", "/TrueType");
                 writer.WriteKey("/BaseFont", "/" + subset.PostScriptName);
-                writer.WriteKey("/FirstChar", "0");
+                writer.WriteKey("/FirstChar", "32");
                 writer.WriteKey("/LastChar", "255");
                 writer.WriteKey("/Encoding", "/WinAnsiEncoding");
                 var widths = BuildWidths(subset, usedGlyphs.TryGetValue(font, out var chars) ? chars : new HashSet<char>());
