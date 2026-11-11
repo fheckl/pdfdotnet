@@ -608,15 +608,9 @@ public sealed class PdfPage
 
             if (glyphMaps.TryGetValue(op.Font, out var glyphMap))
             {
-                // Embedded font: emit WinAnsi character codes as bytes in a TJ array.
-                // The cmap maps character code → glyph ID, so we write the
-                // Unicode code point as the character code.
-                var ids = new List<byte>();
-                foreach (char c in op.Text)
-                {
-                    ids.Add((byte)c);
-                }
-                content.ShowGlyphIds(ids);
+                // Embedded font: emit text as literal string with WinAnsi character codes.
+                // The cmap maps character code → glyph ID.
+                content.ShowText(op.Text);
             }
             else
             {
